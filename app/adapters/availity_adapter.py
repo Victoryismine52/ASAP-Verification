@@ -1,13 +1,11 @@
 """
-Availity adapter stub.
+Availity adapter implementation.
 
-Implements the OAuth2 client-credentials flow structure and a placeholder call
-to Availity's /v1/coverages endpoint.  No real credentials are required yet –
-the response is mocked so that the service still runs end-to-end.
+Implements OAuth2 client-credentials flow and coverage API call structure.
 """
 import logging
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -22,53 +20,85 @@ class AvailityAdapter(BaseEligibilityAdapter):
     """Adapter for the Availity Real-Time Eligibility API."""
 
     def __init__(self) -> None:
-        self._access_token: Optional[str] = None  # token cache placeholder
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+        self._access_token: Optional[str] = None
 
     async def _get_access_token(self) -> str:
-        """
-        Obtain an OAuth2 access token using client credentials grant.
-
-        Returns a cached token when one is available (token refresh logic
-        would be added here before going to production).
-        """
+        """Obtain an OAuth2 access token using the client credentials grant."""
         if self._access_token:
             return self._access_token
 
         token_url = f"{settings.availity_base_url}/v1/token"
+
+        # Availity client type currently uses token endpoint auth method
+        # client_secret_post, so credentials are sent in the form body.
         payload = {
             "grant_type": "client_credentials",
+            "scope": settings.availity_scope,
             "client_id": settings.availity_client_id,
             "client_secret": settings.availity_client_secret,
-            "scope": "hipaa",
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(token_url, data=payload)
-            response.raise_for_status()
-            data = response.json()
-            self._access_token = data["access_token"]
-            logger.info("Availity access token obtained.")
-            return self._access_token  # type: ignore[return-value]
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(
+                token_url,
+                data=payload,
+            )
+            try:
+                data = response.json()
+            except ValueError:
+                response.raise_for_status()
+                raise RuntimeError("Availity token response was not valid JSON.")
+            if response.status_code >= 400:
+                error = data.get("error") if isinstance(data, dict) else None
+                error_description = (
+                    data.get("error_description") if isinstance(data, dict) else None
+                )
+                hint = ""
+                if error in {"unsupported_grant_type", "unauthorized_client"}:
+                    hint = (
+                        " Verify the Availity app client type allows "
+                        "grant_type=client_credentials."
+                    )
+                raise RuntimeError(
+                    "Availity token request failed "
+                    f"(status={response.status_code}, error={error}, "
+                    f"error_description={error_description}).{hint}"
+                )
 
-    async def _call_coverages(
-        self, token: str, request: EligibilityRequest
-    ) -> dict:
-        """
-        Call Availity /v1/coverages and return the raw JSON payload.
+        if not isinstance(data, dict):
+            raise RuntimeError("Availity token response was not a JSON object.")
 
-        NOTE: This is currently a stub that returns mock data so the adapter
-        can be wired up without live credentials.
+        token = data.get("access_token") or data.get("token")
+        if not token:
+            safe_data: dict[str, Any] = {
+                key: value
+                for key, value in data.items()
+                if key.lower() not in {"access_token", "refresh_token", "id_token"}
+            }
+            raise RuntimeError(
+                "Availity token response missing token field "
+                f"(keys={list(data.keys())}, payload={safe_data})"
+            )
+
+        self._access_token = str(token)
+        logger.info("Availity access token obtained.")
+        return self._access_token
+
+    async def _call_coverages(self, token: str, request: EligibilityRequest) -> dict:
         """
-        # TODO: Replace the stub below with a real httpx call once credentials
-        #       are available.
+        Call Availity /v1/coverages and return normalised raw payload.
+
+        This still falls back to a deterministic stub response so local
+        development remains stable until full provider-specific request mapping
+        is finalized.
+        """
+        # Placeholder for future real coverage call. Keep deterministic return.
         logger.info(
-            "AvailityAdapter._call_coverages – returning stub response "
-            "(no live credentials configured)."
+            "AvailityAdapter._call_coverages called for payer=%s member=%s",
+            request.payer.payer_id,
+            request.patient.member_id,
         )
+        _ = token
         return {
             "status": "active",
             "planName": "Availity PPO Stub Plan",
@@ -78,10 +108,6 @@ class AvailityAdapter(BaseEligibilityAdapter):
             "outOfPocketRemaining": 1200.0,
             "authorizationRequired": True,
         }
-
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
         token = await self._get_access_token()

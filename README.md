@@ -98,6 +98,9 @@ All configuration is done through environment variables (or a `.env` file).
 | `AVAILITY_CLIENT_ID` | *(empty)* | Availity OAuth2 client ID |
 | `AVAILITY_CLIENT_SECRET` | *(empty)* | Availity OAuth2 client secret |
 | `AVAILITY_BASE_URL` | `https://api.availity.com` | Availity API base URL |
+| `AVAILITY_SCOPE` | `healthcare-hipaa-transactions-demo` | Space-delimited OAuth scope(s) for token requests |
+
+> **Note:** This service uses OAuth2 **client credentials** and sends credentials as `client_secret_post` form fields at `POST /v1/token`.
 
 ---
 
