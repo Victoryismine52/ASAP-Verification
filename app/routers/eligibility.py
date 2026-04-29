@@ -6,15 +6,11 @@ import logging
 from fastapi import APIRouter, HTTPException, status
 
 from app.models.eligibility import EligibilityRequest, EligibilityResponse
-from app.services.eligibility_service import EligibilityService
+from app.services.eligibility_service import service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/eligibility", tags=["eligibility"])
-
-# One service instance per application lifecycle (adapter is stateless/async-safe)
-_service = EligibilityService()
-
 
 @router.post(
     "/check",
@@ -34,7 +30,7 @@ async def check_eligibility(request: EligibilityRequest) -> EligibilityResponse:
     """
     logger.info("POST /eligibility/check – received request")
     try:
-        return await _service.check(request)
+        return await service.check(request)
     except RuntimeError as exc:
         logger.error("Eligibility check error: %s", exc)
         raise HTTPException(
