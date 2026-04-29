@@ -46,6 +46,7 @@ uvicorn app.main:app --reload
 | `GET`  | `/` | Landing page with provider selector + connection status |
 | `GET`  | `/ui/connection-details` | Current provider diagnostic details (base URL, scope, mode) |
 | `POST` | `/ui/test-call` | Run an eligibility test call from landing page payload |
+| `GET`  | `/example_patients.csv` | Example 10-row CSV for landing-page batch demo |
 | `POST` | `/eligibility/check` | Run an eligibility check |
 | `GET`  | `/docs` | Swagger UI |
 | `GET`  | `/redoc` | ReDoc UI |

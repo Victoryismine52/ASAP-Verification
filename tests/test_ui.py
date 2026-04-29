@@ -16,6 +16,7 @@ async def test_landing_page_served():
     assert response.status_code == 200
     assert "Current Connection" in response.text
     assert "/docs" in response.text
+    assert "Batch CSV Demo" in response.text
 
 
 @pytest.mark.asyncio
@@ -67,6 +68,14 @@ async def test_ui_test_call_returns_eligibility_payload():
     data = response.json()
     assert "status" in data
     assert "source" in data
+
+
+@pytest.mark.asyncio
+async def test_example_csv_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/example_patients.csv")
+    assert response.status_code == 200
+    assert "first_name,last_name,dob,member_id" in response.text
 
 
 @pytest.mark.asyncio

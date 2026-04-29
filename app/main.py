@@ -11,7 +11,8 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
+from pathlib import Path
 
 from app.routers import eligibility as eligibility_router
 from app.services.eligibility_service import get_available_connections, service
@@ -70,10 +71,14 @@ async def landing_page() -> str:
     <meta charset="utf-8" />
     <title>Eligibility Service</title>
     <style>
-      body { font-family: Arial, sans-serif; max-width: 700px; margin: 3rem auto; line-height: 1.4; }
+      body { font-family: Arial, sans-serif; max-width: 1200px; margin: 2rem auto; line-height: 1.4; }
       .card { border: 1px solid #ddd; padding: 1rem 1.25rem; border-radius: 8px; }
       .status-ok { color: #157347; }
       .status-bad { color: #842029; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      .col { border: 1px solid #ddd; border-radius: 8px; padding: 0.75rem; min-height: 300px; overflow: auto; }
+      table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+      th, td { border: 1px solid #ddd; padding: 4px; text-align: left; }
     </style>
   </head>
   <body>
@@ -90,6 +95,21 @@ async def landing_page() -> str:
       <textarea id="payload" rows="14" style="width:100%;font-family:monospace;"></textarea>
       <button id="test-btn">Run Test Call</button>
       <pre id="test-result"></pre>
+      <h3>Batch CSV Demo</h3>
+      <p>Upload CSV or use <code>example_patients.csv</code> to run a batch demo.</p>
+      <input id="csv-file" type="file" accept=".csv" />
+      <button id="load-example-btn">Load Example CSV</button>
+      <button id="run-batch-btn">Run Batch Calls</button>
+      <div class="grid">
+        <div class="col">
+          <h4>Loaded Patient Rows</h4>
+          <div id="batch-patients"></div>
+        </div>
+        <div class="col">
+          <h4>API Responses (streaming)</h4>
+          <div id="batch-responses"></div>
+        </div>
+      </div>
       <p><a href="/docs">Open Swagger Docs</a></p>
     </div>
     <script>
@@ -100,6 +120,7 @@ async def landing_page() -> str:
         service_type: "30"
       };
       document.getElementById('payload').value = JSON.stringify(defaultPayload, null, 2);
+      let batchRows = [];
 
       async function refresh() {
         const meta = await fetch('/ui/connections').then(r => r.json());
@@ -144,6 +165,84 @@ async def landing_page() -> str:
           resultEl.textContent = `Error: ${err}`;
         }
       });
+      function parseCsv(text) {
+        const lines = text.trim().split(/\\r?\\n/);
+        if (lines.length < 2) return [];
+        const headers = lines[0].split(',').map(x => x.trim());
+        return lines.slice(1).filter(Boolean).map(line => {
+          const cols = line.split(',').map(x => x.trim());
+          const row = {};
+          headers.forEach((h, i) => row[h] = cols[i] || '');
+          return row;
+        });
+      }
+      function renderBatchPatients(rows) {
+        const container = document.getElementById('batch-patients');
+        if (!rows.length) { container.textContent = 'No rows loaded.'; return; }
+        const headers = Object.keys(rows[0]);
+        let html = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
+        for (const row of rows) {
+          html += '<tr>' + headers.map(h => `<td>${row[h] || ''}</td>`).join('') + '</tr>';
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+      }
+      function toEligibilityPayload(row) {
+        return {
+          patient: {
+            first_name: row.first_name,
+            last_name: row.last_name,
+            dob: row.dob,
+            member_id: row.member_id
+          },
+          payer: {
+            name: row.payer_name,
+            payer_id: row.payer_id
+          },
+          provider: {
+            npi: row.npi,
+            tax_id: row.tax_id
+          },
+          service_type: row.service_type || '30'
+        };
+      }
+      async function runBatchCalls() {
+        const out = document.getElementById('batch-responses');
+        out.innerHTML = '';
+        for (let i = 0; i < batchRows.length; i++) {
+          const row = batchRows[i];
+          const payload = toEligibilityPayload(row);
+          const line = document.createElement('pre');
+          line.textContent = `#${i + 1} ${row.first_name} ${row.last_name}: running...`;
+          out.appendChild(line);
+          try {
+            const resp = await fetch('/ui/test-call', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify(payload)
+            });
+            const data = await resp.json();
+            line.textContent = `#${i + 1} ${row.first_name} ${row.last_name}: ${JSON.stringify(data)}`;
+          } catch (err) {
+            line.textContent = `#${i + 1} ${row.first_name} ${row.last_name}: error ${err}`;
+          }
+        }
+      }
+      document.getElementById('csv-file').addEventListener('change', async (e) => {
+        const f = e.target.files[0];
+        if (!f) return;
+        const text = await f.text();
+        batchRows = parseCsv(text);
+        renderBatchPatients(batchRows);
+      });
+      document.getElementById('load-example-btn').addEventListener('click', async () => {
+        const text = await fetch('/example_patients.csv').then(r => r.text());
+        batchRows = parseCsv(text);
+        renderBatchPatients(batchRows);
+      });
+      document.getElementById('run-batch-btn').addEventListener('click', async () => {
+        await runBatchCalls();
+      });
       refresh();
     </script>
   </body>
@@ -182,3 +281,11 @@ async def ui_select_connection(payload: dict) -> dict:
 async def ui_test_call(payload: EligibilityRequest) -> dict:
     response = await service.check(payload)
     return response.model_dump(mode="json")
+
+
+@app.get("/example_patients.csv", response_class=PlainTextResponse, include_in_schema=False)
+async def example_patients_csv() -> str:
+    csv_path = Path("example_patients.csv")
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail="example_patients.csv not found")
+    return csv_path.read_text(encoding="utf-8")
