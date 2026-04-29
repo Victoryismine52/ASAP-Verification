@@ -19,6 +19,7 @@ docker compose up
 ```
 
 The API is available at **http://localhost:8000**  
+Landing page: **http://localhost:8000/**  
 Swagger UI: **http://localhost:8000/docs**
 
 ---
@@ -42,6 +43,7 @@ uvicorn app.main:app --reload
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET`  | `/health` | Liveness probe |
+| `GET`  | `/` | Landing page with provider selector + connection status |
 | `POST` | `/eligibility/check` | Run an eligibility check |
 | `GET`  | `/docs` | Swagger UI |
 | `GET`  | `/redoc` | ReDoc UI |
@@ -98,6 +100,12 @@ All configuration is done through environment variables (or a `.env` file).
 | `AVAILITY_CLIENT_ID` | *(empty)* | Availity OAuth2 client ID |
 | `AVAILITY_CLIENT_SECRET` | *(empty)* | Availity OAuth2 client secret |
 | `AVAILITY_BASE_URL` | `https://api.availity.com` | Availity API base URL |
+| `AVAILITY_SCOPE` | `healthcare-hipaa-transactions-demo` | Space-delimited OAuth scope(s) for token requests |
+| `CONNECTIONS_CONFIG_PATH` | `connections.json` | JSON config file listing providers shown in landing-page dropdown |
+
+> **Note:** This service uses OAuth2 **client credentials** and sends credentials as `client_secret_post` form fields at `POST /v1/token`.
+>
+> **Connections config format:** `{"providers": ["mock", "availity"]}` (unknown providers are ignored).
 
 ---
 
