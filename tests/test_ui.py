@@ -33,6 +33,43 @@ async def test_connections_metadata_and_switch_mock():
 
 
 @pytest.mark.asyncio
+async def test_connection_details_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/ui/connection-details")
+    assert response.status_code == 200
+    data = response.json()
+    assert "provider" in data
+    assert "adapter" in data
+
+
+@pytest.mark.asyncio
+async def test_ui_test_call_returns_eligibility_payload():
+    payload = {
+        "patient": {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "dob": "1985-06-15",
+            "member_id": "MBR123456",
+        },
+        "payer": {
+            "name": "Blue Cross Blue Shield",
+            "payer_id": "BCBS001",
+        },
+        "provider": {
+            "npi": "1234567890",
+            "tax_id": "12-3456789",
+        },
+        "service_type": "30",
+    }
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/ui/test-call", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert "status" in data
+    assert "source" in data
+
+
+@pytest.mark.asyncio
 async def test_switch_unknown_provider_returns_400():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/ui/select-connection", json={"provider": "unknown"})

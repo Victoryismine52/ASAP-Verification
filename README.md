@@ -44,6 +44,8 @@ uvicorn app.main:app --reload
 |--------|------|-------------|
 | `GET`  | `/health` | Liveness probe |
 | `GET`  | `/` | Landing page with provider selector + connection status |
+| `GET`  | `/ui/connection-details` | Current provider diagnostic details (base URL, scope, mode) |
+| `POST` | `/ui/test-call` | Run an eligibility test call from landing page payload |
 | `POST` | `/eligibility/check` | Run an eligibility check |
 | `GET`  | `/docs` | Swagger UI |
 | `GET`  | `/redoc` | ReDoc UI |

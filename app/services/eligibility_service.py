@@ -60,6 +60,27 @@ class EligibilityService:
         self._adapter = self._build_adapter(provider)
         self._provider = provider
 
+    def connection_details(self) -> dict:
+        """Return diagnostic info about the active provider wiring."""
+        details = {
+            "provider": self._provider,
+            "adapter": self._adapter.__class__.__name__,
+        }
+        if self._provider == "availity":
+            details.update(
+                {
+                    "base_url": settings.availity_base_url,
+                    "token_url": f"{settings.availity_base_url}/v1/token",
+                    "scope": settings.availity_scope,
+                    "coverage_call_mode": "stubbed_response",
+                    "notes": (
+                        "OAuth token call is live, but coverage lookup currently returns "
+                        "a deterministic stub response."
+                    ),
+                }
+            )
+        return details
+
     async def connection_status(self) -> dict:
         """Attempt provider-level connectivity and return status payload."""
         try:
