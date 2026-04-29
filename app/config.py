@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     availity_client_id: str = ""
     availity_client_secret: str = ""
     availity_base_url: str = "https://api.availity.com"
+    # Space-delimited OAuth scopes; can be overridden in .env for each client app.
+    availity_scope: str = "healthcare-hipaa-transactions-demo"
+    # Optional JSON file that defines available provider connections for the UI.
+    connections_config_path: str = "connections.json"
 
     model_config = SettingsConfigDict(
         env_file=".env",
