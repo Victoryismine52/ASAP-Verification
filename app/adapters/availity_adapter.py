@@ -22,6 +22,17 @@ class AvailityAdapter(BaseEligibilityAdapter):
     def __init__(self) -> None:
         self._access_token: Optional[str] = None
 
+    def connection_details(self) -> dict:
+        configured = bool(settings.availity_client_id and settings.availity_client_secret)
+        return {
+            "provider": "availity",
+            "configured": configured,
+            "base_url": settings.availity_base_url,
+            "access_requirements": "Availity client ID/secret and approved app",
+            "supported_transaction": "X12 270/271",
+            "notes": "OAuth token call is live; coverage response currently deterministic stub.",
+        }
+
     async def _get_access_token(self) -> str:
         """Obtain an OAuth2 access token using the client credentials grant."""
         if self._access_token:
@@ -110,6 +121,19 @@ class AvailityAdapter(BaseEligibilityAdapter):
         }
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
+        if not (settings.availity_client_id and settings.availity_client_secret):
+            return EligibilityResponse(
+                status="inactive",
+                plan_name="Not configured: missing AVAILITY_CLIENT_ID/AVAILITY_CLIENT_SECRET",
+                copay=None,
+                coinsurance=None,
+                deductible_remaining=None,
+                out_of_pocket_remaining=None,
+                authorization_required=True,
+                source="availity",
+                checked_at=datetime.now(tz=timezone.utc),
+            )
+
         token = await self._get_access_token()
         raw = await self._call_coverages(token, request)
 

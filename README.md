@@ -4,6 +4,9 @@ Production-ready FastAPI microservice for insurance eligibility and benefits
 verification.  Supports a pluggable adapter pattern so that mock testing and
 real Availity integration share the same interface.
 
+> Default mode is **mock**. All non-mock adapters are scaffolded and require
+> vendor/trading-partner credentials before live eligibility calls will work.
+
 ---
 
 ## Quick Start
@@ -99,11 +102,20 @@ All configuration is done through environment variables (or a `.env` file).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ELIGIBILITY_PROVIDER` | `mock` | Adapter to use: `mock` or `availity` |
+| `ELIGIBILITY_PROVIDER` | `mock` | Adapter to use: `mock`, `availity`, `stedi`, `optum_change`, `cms_hets`, or `state_medicaid` |
 | `AVAILITY_CLIENT_ID` | *(empty)* | Availity OAuth2 client ID |
 | `AVAILITY_CLIENT_SECRET` | *(empty)* | Availity OAuth2 client secret |
 | `AVAILITY_BASE_URL` | `https://api.availity.com` | Availity API base URL |
 | `AVAILITY_SCOPE` | `healthcare-hipaa-transactions-demo` | Space-delimited OAuth scope(s) for token requests |
+| `STEDI_API_KEY` | *(empty)* | Stedi API key for 270/271 calls |
+| `STEDI_BASE_URL` | `https://core.us.stedi.com` | Stedi base URL |
+| `OPTUM_CLIENT_ID` | *(empty)* | Optum/Change OAuth client ID |
+| `OPTUM_CLIENT_SECRET` | *(empty)* | Optum/Change OAuth client secret |
+| `OPTUM_BASE_URL` | `https://api.changehealthcare.com` | Optum/Change base URL |
+| `CMS_HETS_SUBMITTER_ID` | *(empty)* | CMS HETS submitter ID |
+| `CMS_HETS_PASSWORD` | *(empty)* | CMS HETS password |
+| `STATE_MEDICAID_ENDPOINT` | *(empty)* | State Medicaid endpoint |
+| `STATE_MEDICAID_API_KEY` | *(empty)* | State Medicaid API credential |
 | `CONNECTIONS_CONFIG_PATH` | `connections.json` | JSON config file listing providers shown in landing-page dropdown |
 
 > **Note:** This service uses OAuth2 **client credentials** and sends credentials as `client_secret_post` form fields at `POST /v1/token`.
@@ -158,3 +170,16 @@ pytest -v
 1. Create `app/adapters/my_provider_adapter.py` implementing `BaseEligibilityAdapter`.
 2. Add a branch in `app/services/eligibility_service.py → _build_adapter()`.
 3. Set `ELIGIBILITY_PROVIDER=my_provider` in your `.env`.
+
+
+## Multi-Source Adapter Platform
+
+The service now exposes a provider adapter matrix on the landing page and supports selecting scaffolded adapters for:
+
+- Availity
+- Stedi
+- Optum/Change Healthcare
+- CMS HETS
+- State Medicaid
+
+Only `mock` is live by default. Scaffolded adapters intentionally return a safe `Not configured` eligibility response when credentials are missing, rather than raising runtime errors.

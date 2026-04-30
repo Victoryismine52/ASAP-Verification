@@ -1,12 +1,16 @@
 """Eligibility service with switchable provider adapters."""
-import logging
 import json
+import logging
 from pathlib import Path
 from typing import Callable
 
-from app.adapters.base import BaseEligibilityAdapter
-from app.adapters.mock_adapter import MockAdapter
 from app.adapters.availity_adapter import AvailityAdapter
+from app.adapters.base import BaseEligibilityAdapter
+from app.adapters.cms_hets_adapter import CmsHetsAdapter
+from app.adapters.mock_adapter import MockAdapter
+from app.adapters.optum_change_adapter import OptumChangeAdapter
+from app.adapters.state_medicaid_adapter import StateMedicaidAdapter
+from app.adapters.stedi_adapter import StediAdapter
 from app.config import settings
 from app.models.eligibility import EligibilityRequest, EligibilityResponse
 
@@ -16,11 +20,23 @@ logger = logging.getLogger(__name__)
 _ADAPTER_BUILDERS: dict[str, Callable[[], BaseEligibilityAdapter]] = {
     "mock": MockAdapter,
     "availity": AvailityAdapter,
+    "stedi": StediAdapter,
+    "optum_change": OptumChangeAdapter,
+    "cms_hets": CmsHetsAdapter,
+    "state_medicaid": StateMedicaidAdapter,
 }
+
+PROVIDER_ADAPTER_MATRIX = [
+    {"provider": "mock", "coverage_type": "Simulated", "real_time_support": "Yes (mocked)", "access_needed": "None", "best_use": "Local development and CI"},
+    {"provider": "availity", "coverage_type": "Commercial and payer network", "real_time_support": "Token live; eligibility scaffold", "access_needed": "Availity app credentials", "best_use": "Availity-connected workflows"},
+    {"provider": "stedi", "coverage_type": "Multi-payer EDI gateway", "real_time_support": "Scaffolded", "access_needed": "Stedi API key + enrollment", "best_use": "Unified EDI integrations"},
+    {"provider": "optum_change", "coverage_type": "Commercial + clearinghouse", "real_time_support": "Scaffolded", "access_needed": "Client credentials + trading partner", "best_use": "Enterprise clearinghouse connectivity"},
+    {"provider": "cms_hets", "coverage_type": "Medicare", "real_time_support": "Scaffolded", "access_needed": "HETS submitter account", "best_use": "Medicare beneficiary checks"},
+    {"provider": "state_medicaid", "coverage_type": "State Medicaid", "real_time_support": "Varies by state", "access_needed": "State portal/API credentials", "best_use": "State-specific Medicaid verification"},
+]
 
 
 def get_available_connections() -> list[str]:
-    """Return providers from config file, falling back to built-ins."""
     config_path = Path(settings.connections_config_path)
     if not config_path.exists():
         return list(_ADAPTER_BUILDERS.keys())
@@ -29,7 +45,6 @@ def get_available_connections() -> list[str]:
     except Exception as exc:
         logger.warning("Unable to parse connections config %s: %s", config_path, exc)
         return list(_ADAPTER_BUILDERS.keys())
-
     if isinstance(data, dict):
         providers = data.get("providers", [])
         if isinstance(providers, list):
@@ -40,8 +55,6 @@ def get_available_connections() -> list[str]:
 
 
 class EligibilityService:
-    """Orchestrates eligibility checks through the configured adapter."""
-
     def __init__(self) -> None:
         self._provider = settings.eligibility_provider.lower()
         self._adapter: BaseEligibilityAdapter = self._build_adapter(self._provider)
@@ -61,29 +74,15 @@ class EligibilityService:
         self._provider = provider
 
     def connection_details(self) -> dict:
-        """Return diagnostic info about the active provider wiring."""
-        details = {
-            "provider": self._provider,
-            "adapter": self._adapter.__class__.__name__,
-        }
-        if self._provider == "availity":
-            details.update(
-                {
-                    "base_url": settings.availity_base_url,
-                    "token_url": f"{settings.availity_base_url}/v1/token",
-                    "scope": settings.availity_scope,
-                    "coverage_call_mode": "stubbed_response",
-                    "notes": (
-                        "OAuth token call is live, but coverage lookup currently returns "
-                        "a deterministic stub response."
-                    ),
-                }
-            )
+        details = {"provider": self._provider, "adapter": self._adapter.__class__.__name__}
+        details.update(self._adapter.connection_details())
         return details
 
     async def connection_status(self) -> dict:
-        """Attempt provider-level connectivity and return status payload."""
         try:
+            details = self._adapter.connection_details()
+            if not details.get("configured", False):
+                return {"provider": self._provider, "connected": False, "detail": "not configured"}
             if self._provider == "availity":
                 await self._adapter._get_access_token()  # type: ignore[attr-defined]
             return {"provider": self._provider, "connected": True, "detail": "ok"}
@@ -91,28 +90,8 @@ class EligibilityService:
             return {"provider": self._provider, "connected": False, "detail": str(exc)}
 
     async def check(self, request: EligibilityRequest) -> EligibilityResponse:
-        """
-        Perform an eligibility check.
-
-        Args:
-            request: Validated input payload.
-
-        Returns:
-            Normalised EligibilityResponse.
-
-        Raises:
-            RuntimeError: If the adapter raises an unexpected exception.
-        """
-        logger.info(
-            "EligibilityService.check – patient=%s %s payer=%s",
-            request.patient.first_name,
-            request.patient.last_name,
-            request.payer.payer_id,
-        )
         try:
-            response = await self._adapter.check_eligibility(request)
-            logger.info("EligibilityService.check – completed, status=%s", response.status)
-            return response
+            return await self._adapter.check_eligibility(request)
         except Exception as exc:
             logger.exception("EligibilityService.check – adapter error: %s", exc)
             raise RuntimeError(f"Eligibility check failed: {exc}") from exc

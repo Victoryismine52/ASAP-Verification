@@ -48,5 +48,5 @@ class EligibilityResponse(BaseModel):
     deductible_remaining: Optional[float] = Field(None, json_schema_extra={"example": 500.0})
     out_of_pocket_remaining: Optional[float] = Field(None, json_schema_extra={"example": 1500.0})
     authorization_required: bool = Field(..., json_schema_extra={"example": False})
-    source: Literal["mock", "availity"] = Field(..., json_schema_extra={"example": "mock"})
+    source: str = Field(..., json_schema_extra={"example": "mock"})
     checked_at: datetime = Field(..., json_schema_extra={"example": "2026-01-01T12:00:00Z"})

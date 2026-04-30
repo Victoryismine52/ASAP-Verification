@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from pathlib import Path
 
 from app.routers import eligibility as eligibility_router
-from app.services.eligibility_service import get_available_connections, service
+from app.services.eligibility_service import PROVIDER_ADAPTER_MATRIX, get_available_connections, service
 from app.models.eligibility import EligibilityRequest
 from app.utils.logging import configure_logging
 
@@ -110,6 +110,8 @@ async def landing_page() -> str:
           <div id="batch-responses"></div>
         </div>
       </div>
+      <h3>Provider Adapter Matrix</h3>
+      <div id="adapter-matrix"></div>
       <p><a href="/docs">Open Swagger Docs</a></p>
     </div>
     <script>
@@ -139,6 +141,14 @@ async def landing_page() -> str:
         statusEl.className = s.connected ? 'status-ok' : 'status-bad';
         const details = await fetch('/ui/connection-details').then(r => r.json());
         document.getElementById('details').textContent = JSON.stringify(details, null, 2);
+        const matrix = await fetch('/ui/provider-matrix').then(r => r.json());
+        const headers = ['provider','coverage_type','real_time_support','access_needed','best_use'];
+        let html = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
+        for (const row of matrix.providers) {
+          html += '<tr>' + headers.map(h => `<td>${row[h] || ''}</td>`).join('') + '</tr>';
+        }
+        html += '</tbody></table>';
+        document.getElementById('adapter-matrix').innerHTML = html;
       }
       document.getElementById('switch-btn').addEventListener('click', async () => {
         const provider = document.getElementById('provider').value;
@@ -289,3 +299,8 @@ async def example_patients_csv() -> str:
     if not csv_path.exists():
         raise HTTPException(status_code=404, detail="example_patients.csv not found")
     return csv_path.read_text(encoding="utf-8")
+
+
+@app.get("/ui/provider-matrix", include_in_schema=False)
+async def ui_provider_matrix() -> dict:
+    return {"providers": PROVIDER_ADAPTER_MATRIX}

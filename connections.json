@@ -1,6 +1,10 @@
 {
   "providers": [
     "mock",
-    "availity"
+    "availity",
+    "stedi",
+    "optum_change",
+    "cms_hets",
+    "state_medicaid"
   ]
 }

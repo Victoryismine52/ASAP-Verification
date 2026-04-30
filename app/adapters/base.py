@@ -21,3 +21,8 @@ class BaseEligibilityAdapter(ABC):
             Normalised EligibilityResponse.
         """
         ...
+
+    @abstractmethod
+    def connection_details(self) -> dict:
+        """Return adapter-level connection metadata and configuration status."""
+        ...

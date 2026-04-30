@@ -17,6 +17,7 @@ async def test_landing_page_served():
     assert "Current Connection" in response.text
     assert "/docs" in response.text
     assert "Batch CSV Demo" in response.text
+    assert "Provider Adapter Matrix" in response.text
 
 
 @pytest.mark.asyncio
@@ -83,3 +84,12 @@ async def test_switch_unknown_provider_returns_400():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/ui/select-connection", json={"provider": "unknown"})
     assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_provider_matrix_endpoint():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/ui/provider-matrix")
+    assert response.status_code == 200
+    providers = response.json()["providers"]
+    assert any(p["provider"] == "stedi" for p in providers)

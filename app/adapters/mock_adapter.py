@@ -11,6 +11,16 @@ from app.models.eligibility import EligibilityRequest, EligibilityResponse
 class MockAdapter(BaseEligibilityAdapter):
     """Returns hard-coded eligibility data suitable for local development and CI."""
 
+    def connection_details(self) -> dict:
+        return {
+            "provider": "mock",
+            "configured": True,
+            "base_url": None,
+            "access_requirements": "None",
+            "supported_transaction": "X12 270/271 (simulated)",
+            "notes": "Always available with deterministic test data.",
+        }
+
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
         return EligibilityResponse(
             status="active",
