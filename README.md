@@ -183,3 +183,38 @@ The service now exposes a provider adapter matrix on the landing page and suppor
 - State Medicaid
 
 Only `mock` is live by default. Scaffolded adapters intentionally return a safe `Not configured` eligibility response when credentials are missing, rather than raising runtime errors.
+
+## Persistence and Operational History
+
+The service now persists operational request/response records using SQLAlchemy.
+
+- `DATABASE_URL` env var controls the database connection.
+- Default: `sqlite:///./asap_verification.db`.
+- Models are designed to be PostgreSQL-compatible (portable SQLAlchemy schema).
+
+### Stored entities
+
+- `VerificationRequest`
+- `VerificationResult`
+- `IntegrationOutbox`
+
+Every `POST /eligibility/check` and `POST /ui/test-call` is saved with request metadata, raw JSON, normalized fields, status, timing, and errors.
+
+### History APIs
+
+- `GET /history`
+- `GET /history/{request_id}`
+- `POST /history/{request_id}/rerun`
+- `GET /history/export.csv`
+
+### NextGen export workflow
+
+Use `GET /exports/nextgen/eligibility-results.csv` to download a normalized CSV for import/review in NextGen-adjacent operational workflows.
+
+After each successful eligibility response, an `IntegrationOutbox` row is created with:
+
+- `target_system = nextgen`
+- `target_record_type = eligibility_result`
+- `status = ready_for_review`
+
+Direct NextGen writeback is intentionally deferred until an approved integration path and governance controls are established.

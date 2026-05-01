@@ -10,13 +10,17 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from pathlib import Path
 
 from app.routers import eligibility as eligibility_router
 from app.services.eligibility_service import PROVIDER_ADAPTER_MATRIX, get_available_connections, service
 from app.models.eligibility import EligibilityRequest
+from sqlalchemy.orm import Session
+from app.db import Base, engine, get_db
+from app.models.persistence import IntegrationOutbox, VerificationRequest, VerificationResult
+from app.services.persistence_service import complete_request_error, complete_request_success, create_request_record, nextgen_csv, outbox_status_counts
 from app.utils.logging import configure_logging
 
 # Configure structured logging before anything else
@@ -28,6 +32,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Handle application startup and shutdown events."""
+    Base.metadata.create_all(bind=engine)
     logger.info("Eligibility service started.")
     yield
     logger.info("Eligibility service stopped.")
@@ -110,7 +115,7 @@ async def landing_page() -> str:
           <div id="batch-responses"></div>
         </div>
       </div>
-      <h3>Provider Adapter Matrix</h3>
+      <h3>Operations</h3><p><a href="/exports/nextgen/eligibility-results.csv">Download NextGen Eligibility CSV</a></p><div id="outbox-status"></div><h4>Recent 25 Checks</h4><pre id="recent-checks"></pre><h3>Provider Adapter Matrix</h3>
       <div id="adapter-matrix"></div>
       <p><a href="/docs">Open Swagger Docs</a></p>
     </div>
@@ -141,6 +146,10 @@ async def landing_page() -> str:
         statusEl.className = s.connected ? 'status-ok' : 'status-bad';
         const details = await fetch('/ui/connection-details').then(r => r.json());
         document.getElementById('details').textContent = JSON.stringify(details, null, 2);
+        const hist = await fetch('/history').then(r=>r.json());
+        document.getElementById('recent-checks').textContent = JSON.stringify(hist.items, null, 2);
+        const outbox = await fetch('/ui/outbox-status').then(r=>r.json());
+        document.getElementById('outbox-status').textContent = `Outbox status counts: ${JSON.stringify(outbox)}`;
         const matrix = await fetch('/ui/provider-matrix').then(r => r.json());
         const headers = ['provider','coverage_type','real_time_support','access_needed','best_use'];
         let html = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
@@ -288,9 +297,17 @@ async def ui_select_connection(payload: dict) -> dict:
 
 
 @app.post("/ui/test-call", include_in_schema=False)
-async def ui_test_call(payload: EligibilityRequest) -> dict:
-    response = await service.check(payload)
-    return response.model_dump(mode="json")
+async def ui_test_call(payload: EligibilityRequest, db: Session = Depends(get_db)) -> dict:
+    from datetime import datetime, timezone
+    started = datetime.now(timezone.utc)
+    req_rec = create_request_record(db, payload, "/ui/test-call", service.get_provider())
+    try:
+        response = await service.check(payload)
+        complete_request_success(db, req_rec, response, started)
+        return response.model_dump(mode="json")
+    except RuntimeError as exc:
+        complete_request_error(db, req_rec, str(exc), started)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/example_patients.csv", response_class=PlainTextResponse, include_in_schema=False)
@@ -304,3 +321,42 @@ async def example_patients_csv() -> str:
 @app.get("/ui/provider-matrix", include_in_schema=False)
 async def ui_provider_matrix() -> dict:
     return {"providers": PROVIDER_ADAPTER_MATRIX}
+
+
+@app.get("/history")
+async def history(db: Session = Depends(get_db)) -> dict:
+    rows = db.query(VerificationRequest).order_by(VerificationRequest.created_at.desc()).limit(25).all()
+    return {"items": [{"request_id": r.request_id, "status": r.status, "source": r.provider_source, "created_at": r.created_at.isoformat()} for r in rows]}
+
+
+@app.get("/history/{request_id}")
+async def history_item(request_id: str, db: Session = Depends(get_db)) -> dict:
+    req = db.query(VerificationRequest).filter(VerificationRequest.request_id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Not found")
+    res = db.query(VerificationResult).filter(VerificationResult.request_id == request_id).first()
+    return {"request": {"request_id": req.request_id, "status": req.status, "error_message": req.error_message}, "result": None if not res else {"status": res.eligibility_status, "plan_name": res.plan_name}}
+
+
+@app.post("/history/{request_id}/rerun")
+async def rerun(request_id: str, db: Session = Depends(get_db)) -> dict:
+    req = db.query(VerificationRequest).filter(VerificationRequest.request_id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Not found")
+    payload = EligibilityRequest(patient={"first_name": req.patient_first_name, "last_name": req.patient_last_name, "dob": req.patient_dob.isoformat(), "member_id": req.patient_member_id}, payer={"name": req.payer_name, "payer_id": req.payer_id}, provider={"npi": req.provider_npi, "tax_id": req.provider_tax_id}, service_type=req.service_type)
+    return await ui_test_call(payload, db)
+
+
+@app.get("/history/export.csv", response_class=PlainTextResponse)
+async def history_export(db: Session = Depends(get_db)) -> str:
+    return nextgen_csv(db)
+
+
+@app.get("/exports/nextgen/eligibility-results.csv", response_class=PlainTextResponse)
+async def nextgen_export(db: Session = Depends(get_db)) -> str:
+    return nextgen_csv(db)
+
+
+@app.get("/ui/outbox-status", include_in_schema=False)
+async def ui_outbox_status(db: Session = Depends(get_db)) -> dict:
+    return outbox_status_counts(db)
