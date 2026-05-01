@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -67,3 +67,28 @@ class IntegrationOutbox(Base):
     status: Mapped[str] = mapped_column(String(64))
     payload_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class VerificationWorkItem(Base):
+    __tablename__ = "verification_work_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    patient_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+
+    first_name: Mapped[str] = mapped_column(String(120))
+    last_name: Mapped[str] = mapped_column(String(120))
+    dob: Mapped[date] = mapped_column(Date)
+    member_id: Mapped[str] = mapped_column(String(120))
+    payer_name: Mapped[str] = mapped_column(String(200))
+    payer_id: Mapped[str] = mapped_column(String(80))
+    npi: Mapped[str] = mapped_column(String(40))
+    tax_id: Mapped[str] = mapped_column(String(40))
+    service_type: Mapped[str] = mapped_column(String(20), default="30")
+
+    needs_validation: Mapped[bool] = mapped_column(Boolean, default=True)
+    validation_status: Mapped[str] = mapped_column(String(64), default="pending_validation")
+    source_method: Mapped[str] = mapped_column(String(64), default="csv_upload")
+    last_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -10,9 +10,11 @@ services:
     environment:
       # Override with "availity" to use the real adapter
       ELIGIBILITY_PROVIDER: ${ELIGIBILITY_PROVIDER:-mock}
+      DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/asap_verification.db}
     # Hot-reload for development: mount source and override CMD
     volumes:
       - ./app:/app/app
+      - ./data:/app/data
     command: >
       uvicorn app.main:app
       --host 0.0.0.0
