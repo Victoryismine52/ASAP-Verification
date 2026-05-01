@@ -85,3 +85,42 @@ async def test_validate_endpoint_updates_status_to_validated():
         assert row.last_request_id is not None
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_patch_work_item_marks_needs_revalidation_and_validate_still_works():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    csv_text = CSV_HEADER + "Jane,Doe,1985-06-15,MBR123456,Blue Cross,BCBS001,1234567890,12-3456789,30\n"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/work-items/import.csv", files={"file": ("patients.csv", csv_text, "text/csv")})
+        items = await client.get("/work-items")
+        item_id = items.json()["items"][0]["id"]
+        patch = await client.patch(f"/work-items/{item_id}", json={"first_name": "Janet", "notes": "edited"})
+        assert patch.status_code == 200
+        assert patch.json()["validation_status"] == "needs_revalidation"
+        assert patch.json()["needs_validation"] is True
+        validated = await client.post(f"/work-items/{item_id}/validate")
+        assert validated.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_work_item_export_csv_and_outbox_status_update():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    csv_text = CSV_HEADER + "Jane,Doe,1985-06-15,MBR123456,Blue Cross,BCBS001,1234567890,12-3456789,30\n"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/work-items/import.csv", files={"file": ("patients.csv", csv_text, "text/csv")})
+        items = await client.get("/work-items")
+        item_id = items.json()["items"][0]["id"]
+        await client.post(f"/work-items/{item_id}/validate")
+        exp = await client.get("/work-items/export.csv")
+        assert exp.status_code == 200
+        assert "first_name,last_name" in exp.text
+        outbox = await client.get("/outbox")
+        assert outbox.status_code == 200
+        assert len(outbox.json()["items"]) >= 1
+        outbox_id = outbox.json()["items"][0]["id"]
+        upd = await client.patch(f"/outbox/{outbox_id}", json={"status": "exported"})
+        assert upd.status_code == 200
+        assert upd.json()["status"] == "exported"

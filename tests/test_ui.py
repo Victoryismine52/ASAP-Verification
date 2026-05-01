@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 os.environ.setdefault("ELIGIBILITY_PROVIDER", "mock")
 
 from app.main import app  # noqa: E402
+from app.db import Base, engine  # noqa: E402
 
 
 @pytest.mark.asyncio
@@ -14,9 +15,11 @@ async def test_landing_page_served():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/")
     assert response.status_code == 200
-    assert "Current Connection" in response.text
-    assert "/docs" in response.text
-    assert "Batch CSV Demo" in response.text
+    assert "Dashboard" in response.text
+    assert "Work Queue" in response.text
+    assert "Request History" in response.text
+    assert "Outbox" in response.text
+    assert "Import CSV to Work Queue" in response.text
     assert "Provider Adapter Matrix" in response.text
 
 
@@ -46,6 +49,7 @@ async def test_connection_details_endpoint():
 
 @pytest.mark.asyncio
 async def test_ui_test_call_returns_eligibility_payload():
+    Base.metadata.create_all(bind=engine)
     payload = {
         "patient": {
             "first_name": "Jane",
