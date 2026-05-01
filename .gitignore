@@ -28,3 +28,6 @@ htmlcov/
 .vscode/
 .idea/
 *.iml
+
+*.db
+data/*.db

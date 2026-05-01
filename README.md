@@ -189,7 +189,7 @@ Only `mock` is live by default. Scaffolded adapters intentionally return a safe 
 The service now persists operational request/response records using SQLAlchemy.
 
 - `DATABASE_URL` env var controls the database connection.
-- Default: `sqlite:///./asap_verification.db`.
+- Default: `sqlite:///./data/asap_verification.db`.
 - Models are designed to be PostgreSQL-compatible (portable SQLAlchemy schema).
 
 ### Stored entities
@@ -218,3 +218,9 @@ After each successful eligibility response, an `IntegrationOutbox` row is create
 - `status = ready_for_review`
 
 Direct NextGen writeback is intentionally deferred until an approved integration path and governance controls are established.
+
+## Codespaces / Container Persistence Notes
+
+- SQLite now writes to `./data/asap_verification.db` by default.
+- `docker-compose.yml` mounts `./data:/app/data` so DB files persist across container restarts.
+- In GitHub Codespaces, this keeps verification history and work items between service restarts as long as the workspace is retained.
