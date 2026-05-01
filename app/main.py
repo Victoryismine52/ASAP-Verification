@@ -9,6 +9,7 @@ or via Docker Compose:
 import logging
 import csv
 import io
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -22,7 +23,7 @@ from app.models.eligibility import EligibilityRequest
 from sqlalchemy.orm import Session
 from app.db import Base, engine, get_db
 from app.models.persistence import IntegrationOutbox, VerificationRequest, VerificationResult, VerificationWorkItem
-from app.services.persistence_service import complete_request_error, complete_request_success, create_request_record, nextgen_csv, outbox_status_counts, upsert_work_item_from_csv_row
+from app.services.persistence_service import complete_request_error, complete_request_success, create_request_record, nextgen_csv, outbox_status_counts, patient_key_for_row, upsert_work_item_from_csv_row
 from app.utils.logging import configure_logging
 
 # Configure structured logging before anything else
@@ -70,205 +71,41 @@ async def health() -> dict:
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def landing_page() -> str:
-    """Simple UI for connection selection and status."""
+    """Operations console UI."""
     return """
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Eligibility Service</title>
-    <style>
-      body { font-family: Arial, sans-serif; max-width: 1200px; margin: 2rem auto; line-height: 1.4; }
-      .card { border: 1px solid #ddd; padding: 1rem 1.25rem; border-radius: 8px; }
-      .status-ok { color: #157347; }
-      .status-bad { color: #842029; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-      .col { border: 1px solid #ddd; border-radius: 8px; padding: 0.75rem; min-height: 300px; overflow: auto; }
-      table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
-      th, td { border: 1px solid #ddd; padding: 4px; text-align: left; }
-    </style>
-  </head>
-  <body>
-    <h1>Eligibility Service</h1>
-    <div class="card">
-      <label for="provider"><strong>Current Connection:</strong></label>
-      <select id="provider"></select>
-      <button id="switch-btn">Switch</button>
-      <p id="current-provider"></p>
-      <p id="status"></p>
-      <pre id="details"></pre>
-      <h3>Test Eligibility Call</h3>
-      <p>Run a test call from this page (same backend route logic as API).</p>
-      <textarea id="payload" rows="14" style="width:100%;font-family:monospace;"></textarea>
-      <button id="test-btn">Run Test Call</button>
-      <pre id="test-result"></pre>
-      <h3>Batch CSV Demo</h3>
-      <p>Upload CSV or use <code>example_patients.csv</code> to run a batch demo.</p>
-      <input id="csv-file" type="file" accept=".csv" />
-      <button id="load-example-btn">Load Example CSV</button>
-      <button id="run-batch-btn">Run Batch Calls</button>
-      <div class="grid">
-        <div class="col">
-          <h4>Loaded Patient Rows</h4>
-          <div id="batch-patients"></div>
-        </div>
-        <div class="col">
-          <h4>API Responses (streaming)</h4>
-          <div id="batch-responses"></div>
-        </div>
-      </div>
-      <h3>Operations</h3><p><a href="/exports/nextgen/eligibility-results.csv">Download NextGen Eligibility CSV</a></p><div id="outbox-status"></div><h4>Recent 25 Checks</h4><pre id="recent-checks"></pre><h3>Provider Adapter Matrix</h3>
-      <div id="adapter-matrix"></div>
-      <p><a href="/docs">Open Swagger Docs</a></p>
-    </div>
-    <script>
-      const defaultPayload = {
-        patient: { first_name: "Jane", last_name: "Doe", dob: "1985-06-15", member_id: "MBR123456" },
-        payer: { name: "Blue Cross Blue Shield", payer_id: "BCBS001" },
-        provider: { npi: "1234567890", tax_id: "12-3456789" },
-        service_type: "30"
-      };
-      document.getElementById('payload').value = JSON.stringify(defaultPayload, null, 2);
-      let batchRows = [];
-
-      async function refresh() {
-        const meta = await fetch('/ui/connections').then(r => r.json());
-        const sel = document.getElementById('provider');
-        sel.innerHTML = '';
-        for (const p of meta.providers) {
-          const o = document.createElement('option');
-          o.value = p; o.textContent = p;
-          if (p === meta.current_provider) o.selected = true;
-          sel.appendChild(o);
-        }
-        const s = await fetch('/ui/connection-status').then(r => r.json());
-        document.getElementById('current-provider').textContent = `Active provider: ${s.provider}`;
-        const statusEl = document.getElementById('status');
-        statusEl.textContent = s.connected ? `Connected: ${s.detail}` : `Not connected: ${s.detail}`;
-        statusEl.className = s.connected ? 'status-ok' : 'status-bad';
-        const details = await fetch('/ui/connection-details').then(r => r.json());
-        document.getElementById('details').textContent = JSON.stringify(details, null, 2);
-        const hist = await fetch('/history').then(r=>r.json());
-        document.getElementById('recent-checks').textContent = JSON.stringify(hist.items, null, 2);
-        const outbox = await fetch('/ui/outbox-status').then(r=>r.json());
-        document.getElementById('outbox-status').textContent = `Outbox status counts: ${JSON.stringify(outbox)}`;
-        const matrix = await fetch('/ui/provider-matrix').then(r => r.json());
-        const headers = ['provider','coverage_type','real_time_support','access_needed','best_use'];
-        let html = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
-        for (const row of matrix.providers) {
-          html += '<tr>' + headers.map(h => `<td>${row[h] || ''}</td>`).join('') + '</tr>';
-        }
-        html += '</tbody></table>';
-        document.getElementById('adapter-matrix').innerHTML = html;
-      }
-      document.getElementById('switch-btn').addEventListener('click', async () => {
-        const provider = document.getElementById('provider').value;
-        await fetch('/ui/select-connection', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({provider})
-        });
-        await refresh();
-      });
-      document.getElementById('test-btn').addEventListener('click', async () => {
-        const resultEl = document.getElementById('test-result');
-        resultEl.textContent = 'Running...';
-        try {
-          const payload = JSON.parse(document.getElementById('payload').value);
-          const resp = await fetch('/ui/test-call', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(payload)
-          });
-          const data = await resp.json();
-          resultEl.textContent = JSON.stringify(data, null, 2);
-        } catch (err) {
-          resultEl.textContent = `Error: ${err}`;
-        }
-      });
-      function parseCsv(text) {
-        const lines = text.trim().split(/\\r?\\n/);
-        if (lines.length < 2) return [];
-        const headers = lines[0].split(',').map(x => x.trim());
-        return lines.slice(1).filter(Boolean).map(line => {
-          const cols = line.split(',').map(x => x.trim());
-          const row = {};
-          headers.forEach((h, i) => row[h] = cols[i] || '');
-          return row;
-        });
-      }
-      function renderBatchPatients(rows) {
-        const container = document.getElementById('batch-patients');
-        if (!rows.length) { container.textContent = 'No rows loaded.'; return; }
-        const headers = Object.keys(rows[0]);
-        let html = '<table><thead><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr></thead><tbody>';
-        for (const row of rows) {
-          html += '<tr>' + headers.map(h => `<td>${row[h] || ''}</td>`).join('') + '</tr>';
-        }
-        html += '</tbody></table>';
-        container.innerHTML = html;
-      }
-      function toEligibilityPayload(row) {
-        return {
-          patient: {
-            first_name: row.first_name,
-            last_name: row.last_name,
-            dob: row.dob,
-            member_id: row.member_id
-          },
-          payer: {
-            name: row.payer_name,
-            payer_id: row.payer_id
-          },
-          provider: {
-            npi: row.npi,
-            tax_id: row.tax_id
-          },
-          service_type: row.service_type || '30'
-        };
-      }
-      async function runBatchCalls() {
-        const out = document.getElementById('batch-responses');
-        out.innerHTML = '';
-        for (let i = 0; i < batchRows.length; i++) {
-          const row = batchRows[i];
-          const payload = toEligibilityPayload(row);
-          const line = document.createElement('pre');
-          line.textContent = `#${i + 1} ${row.first_name} ${row.last_name}: running...`;
-          out.appendChild(line);
-          try {
-            const resp = await fetch('/ui/test-call', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(payload)
-            });
-            const data = await resp.json();
-            line.textContent = `#${i + 1} ${row.first_name} ${row.last_name}: ${JSON.stringify(data)}`;
-          } catch (err) {
-            line.textContent = `#${i + 1} ${row.first_name} ${row.last_name}: error ${err}`;
-          }
-        }
-      }
-      document.getElementById('csv-file').addEventListener('change', async (e) => {
-        const f = e.target.files[0];
-        if (!f) return;
-        const text = await f.text();
-        batchRows = parseCsv(text);
-        renderBatchPatients(batchRows);
-      });
-      document.getElementById('load-example-btn').addEventListener('click', async () => {
-        const text = await fetch('/example_patients.csv').then(r => r.text());
-        batchRows = parseCsv(text);
-        renderBatchPatients(batchRows);
-      });
-      document.getElementById('run-batch-btn').addEventListener('click', async () => {
-        await runBatchCalls();
-      });
-      refresh();
-    </script>
-  </body>
-</html>
-"""
+<!doctype html><html><head><meta charset='utf-8'/><title>ASAP Verification Console</title>
+<style>body{font-family:Arial;margin:1rem auto;max-width:1400px}.tabs button{margin-right:.4rem}.tab{display:none}.tab.active{display:block}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{border:1px solid #ddd;padding:4px}</style>
+</head><body>
+<h1>ASAP Verification Operations Console</h1>
+<div class='tabs'>
+<button onclick="showTab('dashboard')">Dashboard</button><button onclick="showTab('workqueue')">Work Queue</button><button onclick="showTab('history')">Request History</button><button onclick="showTab('outbox')">Outbox</button><button onclick="showTab('exports')">Exports</button><button onclick="showTab('providers')">Providers</button><button onclick="showTab('manual')">Manual Test</button>
+</div>
+<div id='dashboard' class='tab active'><h2>Dashboard</h2><pre id='dash'></pre><button onclick='validatePending()'>Validate Pending</button><a href='/work-items/export.csv'>Export Work Queue CSV</a></div>
+<div id='workqueue' class='tab'><h2>Work Queue</h2><input id='work-status' placeholder='status filter'/><button onclick='loadWork()'>Refresh</button><button onclick='validatePending()'>Validate Pending</button><input id='csv-file' type='file' accept='.csv'/><button onclick='importCsv()'>Import CSV to Work Queue</button><pre id='import-result'></pre><table id='work-table'></table></div>
+<div id='history' class='tab'><h2>Request History</h2><button onclick='loadHistory()'>Refresh</button><table id='hist-table'></table></div>
+<div id='outbox' class='tab'><h2>Outbox</h2><button onclick='loadOutbox()'>Refresh</button><a href='/outbox/export.csv'>Export CSV</a><table id='outbox-table'></table></div>
+<div id='exports' class='tab'><h2>Exports</h2><ul><li><a href='/exports/nextgen/eligibility-results.csv'>Download NextGen Eligibility CSV</a></li><li><a href='/history/export.csv'>Download History CSV</a></li><li><a href='/work-items/export.csv'>Download Work Queue CSV</a></li><li><a href='/outbox/export.csv'>Download Outbox CSV</a></li></ul></div>
+<div id='providers' class='tab'><h2>Providers</h2><h3>Provider Adapter Matrix</h3><select id='provider'></select><button id='switch-btn'>Switch</button><pre id='details'></pre><div id='adapter-matrix'></div></div>
+<div id='manual' class='tab'><h2>Manual Test</h2><textarea id='payload' rows='12' style='width:100%'></textarea><button id='test-btn'>Run Test Call</button><pre id='test-result'></pre></div>
+<script>
+function showTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.getElementById(id).classList.add('active');}
+async function dashboard(){const w=await fetch('/work-items').then(r=>r.json());const h=await fetch('/history').then(r=>r.json());const o=await fetch('/outbox').then(r=>r.json());const c={total_work_items:w.items.length,pending_validation:w.items.filter(i=>i.validation_status==='pending_validation').length,needs_revalidation:w.items.filter(i=>i.validation_status==='needs_revalidation').length,validated:w.items.filter(i=>i.validation_status==='validated').length,failed:w.items.filter(i=>i.validation_status==='failed').length,outbox_status_counts:o.status_counts,recent_request_count:h.items.length};document.getElementById('dash').textContent=JSON.stringify(c,null,2)}
+async function loadWork(){const s=document.getElementById('work-status').value;const u=s?`/work-items?status=${encodeURIComponent(s)}`:'/work-items';const w=await fetch(u).then(r=>r.json());let html='<tr><th>id</th><th>first_name</th><th>last_name</th><th>dob</th><th>member_id</th><th>payer_name</th><th>payer_id</th><th>service_type</th><th>validation_status</th><th>needs_validation</th><th>last_validated_at</th><th>last_request_id</th><th>updated_at</th><th>actions</th></tr>';for(const i of w.items){html+=`<tr><td>${i.id}</td><td>${i.first_name||''}</td><td>${i.last_name||''}</td><td>${i.dob||''}</td><td>${i.member_id||''}</td><td>${i.payer_name||''}</td><td>${i.payer_id||''}</td><td>${i.service_type||''}</td><td>${i.validation_status}</td><td>${i.needs_validation}</td><td>${i.last_validated_at||''}</td><td>${i.last_request_id||''}</td><td>${i.updated_at||''}</td><td><button onclick='viewItem(${i.id})'>View</button><button onclick='editItem(${i.id})'>Edit</button><button onclick='validateItem(${i.id})'>Validate</button><button onclick='viewLast("${i.last_request_id||''}")'>View Last Result</button></td></tr>`}document.getElementById('work-table').innerHTML=html;dashboard();}
+async function importCsv(){const f=document.getElementById('csv-file').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);const r=await fetch('/work-items/import.csv',{method:'POST',body:fd});document.getElementById('import-result').textContent=JSON.stringify(await r.json(),null,2);loadWork();}
+async function validateItem(id){await fetch(`/work-items/${id}/validate`,{method:'POST'});loadWork();}
+async function validatePending(){await fetch('/work-items/validate-pending',{method:'POST'});loadWork();}
+async function viewItem(id){alert(JSON.stringify(await fetch(`/work-items/${id}`).then(r=>r.json()),null,2));}
+async function editItem(id){const cur=await fetch(`/work-items/${id}`).then(r=>r.json());cur.notes=prompt('notes',cur.notes||'')||cur.notes;await fetch(`/work-items/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(cur)});loadWork();}
+async function viewLast(rid){if(!rid)return;alert(JSON.stringify(await fetch(`/history/${rid}`).then(r=>r.json()),null,2));}
+async function loadHistory(){const h=await fetch('/history').then(r=>r.json());let html='<tr><th>request_id</th><th>patient</th><th>payer</th><th>service_type</th><th>status</th><th>provider_source</th><th>created_at</th><th>duration_ms</th><th>error_message</th><th>actions</th></tr>';for(const i of h.items){html+=`<tr><td>${i.request_id}</td><td>${i.patient}</td><td>${i.payer}</td><td>${i.service_type}</td><td>${i.status}</td><td>${i.provider_source}</td><td>${i.created_at}</td><td>${i.duration_ms||''}</td><td>${i.error_message||''}</td><td><button onclick='viewLast("${i.request_id}")'>View Details</button><button onclick='rerun("${i.request_id}")'>Rerun</button><button onclick='editBeforeRerun("${i.request_id}")'>Edit Before Rerun</button></td></tr>`}document.getElementById('hist-table').innerHTML=html;}
+async function rerun(id){await fetch(`/history/${id}/rerun`,{method:'POST'});loadHistory();}
+async function editBeforeRerun(id){const d=await fetch(`/history/${id}`).then(r=>r.json());document.getElementById('payload').value=JSON.stringify(d.request_payload,null,2);showTab('manual');}
+async function loadOutbox(){const o=await fetch('/outbox').then(r=>r.json());let html='<tr><th>id</th><th>request_id</th><th>target_system</th><th>target_record_type</th><th>status</th><th>created_at</th><th>actions</th></tr>';for(const i of o.items){html+=`<tr><td>${i.id}</td><td>${i.request_id}</td><td>${i.target_system}</td><td>${i.target_record_type}</td><td>${i.status}</td><td>${i.created_at}</td><td><button onclick='updateOutbox(${i.id})'>Update Status</button><button onclick='viewOutbox(${i.id})'>View Payload</button></td></tr>`}document.getElementById('outbox-table').innerHTML=html;}
+async function updateOutbox(id){const status=prompt('status: ready_for_review/exported/posted/failed','exported');if(!status)return;await fetch(`/outbox/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});loadOutbox();dashboard();}
+async function viewOutbox(id){alert(JSON.stringify(await fetch(`/outbox/${id}`).then(r=>r.json()),null,2));}
+document.getElementById('test-btn').onclick=async()=>{const p=JSON.parse(document.getElementById('payload').value);const r=await fetch('/ui/test-call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});document.getElementById('test-result').textContent=JSON.stringify(await r.json(),null,2)};
+(async()=>{document.getElementById('payload').value=JSON.stringify({patient:{first_name:'Jane',last_name:'Doe',dob:'1985-06-15',member_id:'MBR123456'},payer:{name:'Blue Cross Blue Shield',payer_id:'BCBS001'},provider:{npi:'1234567890',tax_id:'12-3456789'},service_type:'30'},null,2);await dashboard();await loadWork();await loadHistory();await loadOutbox();const matrix=await fetch('/ui/provider-matrix').then(r=>r.json());document.getElementById('adapter-matrix').textContent=JSON.stringify(matrix.providers,null,2);})();
+</script></body></html>"""
 
 
 @app.get("/ui/connections", include_in_schema=False)
@@ -300,7 +137,6 @@ async def ui_select_connection(payload: dict) -> dict:
 
 @app.post("/ui/test-call", include_in_schema=False)
 async def ui_test_call(payload: EligibilityRequest, db: Session = Depends(get_db)) -> dict:
-    from datetime import datetime, timezone
     started = datetime.now(timezone.utc)
     req_rec = create_request_record(db, payload, "/ui/test-call", service.get_provider())
     try:
@@ -328,7 +164,7 @@ async def ui_provider_matrix() -> dict:
 @app.get("/history")
 async def history(db: Session = Depends(get_db)) -> dict:
     rows = db.query(VerificationRequest).order_by(VerificationRequest.created_at.desc()).limit(25).all()
-    return {"items": [{"request_id": r.request_id, "status": r.status, "source": r.provider_source, "created_at": r.created_at.isoformat()} for r in rows]}
+    return {"items": [{"request_id": r.request_id, "patient": f"{r.patient_first_name} {r.patient_last_name}", "payer": f"{r.payer_name} ({r.payer_id})", "service_type": r.service_type, "status": r.status, "provider_source": r.provider_source, "created_at": r.created_at.isoformat(), "duration_ms": r.duration_ms, "error_message": r.error_message} for r in rows]}
 
 
 @app.get("/history/{request_id}")
@@ -337,7 +173,8 @@ async def history_item(request_id: str, db: Session = Depends(get_db)) -> dict:
     if not req:
         raise HTTPException(status_code=404, detail="Not found")
     res = db.query(VerificationResult).filter(VerificationResult.request_id == request_id).first()
-    return {"request": {"request_id": req.request_id, "status": req.status, "error_message": req.error_message}, "result": None if not res else {"status": res.eligibility_status, "plan_name": res.plan_name}}
+    payload = {"patient": {"first_name": req.patient_first_name, "last_name": req.patient_last_name, "dob": req.patient_dob.isoformat(), "member_id": req.patient_member_id}, "payer": {"name": req.payer_name, "payer_id": req.payer_id}, "provider": {"npi": req.provider_npi, "tax_id": req.provider_tax_id}, "service_type": req.service_type}
+    return {"request": {"request_id": req.request_id, "status": req.status, "error_message": req.error_message}, "request_payload": payload, "result": None if not res else {"status": res.eligibility_status, "plan_name": res.plan_name}}
 
 
 @app.post("/history/{request_id}/rerun")
@@ -371,13 +208,19 @@ async def import_work_items_csv(file: UploadFile = File(...), db: Session = Depe
     rows = csv.DictReader(io.StringIO(text))
     inserted = 0
     updated = 0
-    for row in rows:
-        _, action = upsert_work_item_from_csv_row(db, row)
-        if action == "inserted":
-            inserted += 1
-        else:
-            updated += 1
-    return {"inserted": inserted, "updated": updated}
+    failed = 0
+    for idx, row in enumerate(rows, start=2):
+        try:
+            item, action = upsert_work_item_from_csv_row(db, row)
+            item.source_file_name = file.filename
+            item.source_system = "csv_import"
+            item.source_row_number = idx
+            db.commit()
+            if action == "inserted": inserted += 1
+            else: updated += 1
+        except Exception:
+            failed += 1
+    return {"inserted": inserted, "updated": updated, "failed": failed}
 
 
 @app.get("/work-items")
@@ -386,15 +229,36 @@ async def list_work_items(status: str | None = None, db: Session = Depends(get_d
     if status:
         q = q.filter(VerificationWorkItem.validation_status == status)
     items = q.order_by(VerificationWorkItem.created_at.desc()).all()
-    return {"items": [{"id": i.id, "patient_key": i.patient_key, "validation_status": i.validation_status, "needs_validation": i.needs_validation} for i in items]}
+    return {"items": [{"id": i.id, "patient_key": i.patient_key, "first_name": i.first_name, "last_name": i.last_name, "dob": i.dob.isoformat(), "member_id": i.member_id, "payer_name": i.payer_name, "payer_id": i.payer_id, "service_type": i.service_type, "validation_status": i.validation_status, "needs_validation": i.needs_validation, "last_validated_at": i.last_validated_at.isoformat() if i.last_validated_at else None, "last_request_id": i.last_request_id, "updated_at": i.updated_at.isoformat()} for i in items]}
 
 
-@app.get("/work-items/{item_id}")
+@app.get("/work-items/{item_id:int}")
 async def get_work_item(item_id: int, db: Session = Depends(get_db)) -> dict:
     item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
     return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id}
+
+
+@app.patch("/work-items/{item_id:int}")
+async def patch_work_item(item_id: int, payload: dict, db: Session = Depends(get_db)) -> dict:
+    item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+    identity_before = (item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
+    for f in ["first_name","last_name","member_id","payer_name","payer_id","npi","tax_id","service_type","notes"]:
+        if f in payload:
+            setattr(item, f, payload[f])
+    if "dob" in payload:
+        item.dob = datetime.fromisoformat(payload["dob"]).date()
+    identity_after = (item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
+    if identity_before != identity_after:
+        item.patient_key = patient_key_for_row(item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
+    item.needs_validation = True
+    item.validation_status = "needs_revalidation"
+    db.commit()
+    db.refresh(item)
+    return await get_work_item(item.id, db)
 
 
 async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
@@ -416,7 +280,7 @@ async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.post("/work-items/{item_id}/validate")
+@app.post("/work-items/{item_id:int}/validate")
 async def validate_work_item(item_id: int, db: Session = Depends(get_db)) -> dict:
     item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
     if not item:
@@ -431,3 +295,51 @@ async def validate_pending_work_items(db: Session = Depends(get_db)) -> dict:
     for item in items:
         validated.append(await _validate_work_item(item, db))
     return {"validated_count": len(validated), "items": validated}
+
+
+@app.get("/work-items/export.csv", response_class=PlainTextResponse)
+async def export_work_items_csv(db: Session = Depends(get_db)) -> str:
+    items = db.query(VerificationWorkItem).order_by(VerificationWorkItem.created_at.desc()).all()
+    out = io.StringIO()
+    fields = ["id","first_name","last_name","dob","member_id","payer_name","payer_id","service_type","validation_status","needs_validation","last_validated_at","last_request_id","updated_at"]
+    w = csv.DictWriter(out, fieldnames=fields)
+    w.writeheader()
+    for i in items:
+        w.writerow({k: (getattr(i, k).isoformat() if k in {"dob","last_validated_at","updated_at"} and getattr(i, k) else getattr(i, k)) for k in fields})
+    return out.getvalue()
+
+
+@app.get("/outbox")
+async def outbox_list(db: Session = Depends(get_db)) -> dict:
+    rows = db.query(IntegrationOutbox).order_by(IntegrationOutbox.created_at.desc()).limit(100).all()
+    return {"status_counts": outbox_status_counts(db), "items": [{"id": r.id, "request_id": r.request_id, "target_system": r.target_system, "target_record_type": r.target_record_type, "status": r.status, "created_at": r.created_at.isoformat()} for r in rows]}
+
+
+@app.get("/outbox/{id}")
+async def outbox_item(id: int, db: Session = Depends(get_db)) -> dict:
+    row = db.query(IntegrationOutbox).filter(IntegrationOutbox.id == id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": row.id, "request_id": row.request_id, "status": row.status, "payload_json": row.payload_json}
+
+
+@app.patch("/outbox/{id}")
+async def outbox_patch(id: int, payload: dict, db: Session = Depends(get_db)) -> dict:
+    row = db.query(IntegrationOutbox).filter(IntegrationOutbox.id == id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Not found")
+    row.status = payload.get("status", row.status)
+    db.commit()
+    return {"id": row.id, "status": row.status}
+
+
+@app.get("/outbox/export.csv", response_class=PlainTextResponse)
+async def outbox_export(db: Session = Depends(get_db)) -> str:
+    rows = db.query(IntegrationOutbox).order_by(IntegrationOutbox.created_at.desc()).all()
+    out = io.StringIO()
+    fields = ["id","request_id","target_system","target_record_type","status","created_at"]
+    w = csv.DictWriter(out, fieldnames=fields)
+    w.writeheader()
+    for r in rows:
+        w.writerow({"id": r.id, "request_id": r.request_id, "target_system": r.target_system, "target_record_type": r.target_record_type, "status": r.status, "created_at": r.created_at.isoformat()})
+    return out.getvalue()
