@@ -7,10 +7,12 @@ or via Docker Compose:
     docker compose up
 """
 import logging
+import csv
+import io
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from pathlib import Path
 
@@ -19,8 +21,8 @@ from app.services.eligibility_service import PROVIDER_ADAPTER_MATRIX, get_availa
 from app.models.eligibility import EligibilityRequest
 from sqlalchemy.orm import Session
 from app.db import Base, engine, get_db
-from app.models.persistence import IntegrationOutbox, VerificationRequest, VerificationResult
-from app.services.persistence_service import complete_request_error, complete_request_success, create_request_record, nextgen_csv, outbox_status_counts
+from app.models.persistence import IntegrationOutbox, VerificationRequest, VerificationResult, VerificationWorkItem
+from app.services.persistence_service import complete_request_error, complete_request_success, create_request_record, nextgen_csv, outbox_status_counts, upsert_work_item_from_csv_row
 from app.utils.logging import configure_logging
 
 # Configure structured logging before anything else
@@ -360,3 +362,72 @@ async def nextgen_export(db: Session = Depends(get_db)) -> str:
 @app.get("/ui/outbox-status", include_in_schema=False)
 async def ui_outbox_status(db: Session = Depends(get_db)) -> dict:
     return outbox_status_counts(db)
+
+
+@app.post("/work-items/import.csv")
+async def import_work_items_csv(file: UploadFile = File(...), db: Session = Depends(get_db)) -> dict:
+    content = await file.read()
+    text = content.decode("utf-8")
+    rows = csv.DictReader(io.StringIO(text))
+    inserted = 0
+    updated = 0
+    for row in rows:
+        _, action = upsert_work_item_from_csv_row(db, row)
+        if action == "inserted":
+            inserted += 1
+        else:
+            updated += 1
+    return {"inserted": inserted, "updated": updated}
+
+
+@app.get("/work-items")
+async def list_work_items(status: str | None = None, db: Session = Depends(get_db)) -> dict:
+    q = db.query(VerificationWorkItem)
+    if status:
+        q = q.filter(VerificationWorkItem.validation_status == status)
+    items = q.order_by(VerificationWorkItem.created_at.desc()).all()
+    return {"items": [{"id": i.id, "patient_key": i.patient_key, "validation_status": i.validation_status, "needs_validation": i.needs_validation} for i in items]}
+
+
+@app.get("/work-items/{item_id}")
+async def get_work_item(item_id: int, db: Session = Depends(get_db)) -> dict:
+    item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id}
+
+
+async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
+    payload = EligibilityRequest(patient={"first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id}, payer={"name": item.payer_name, "payer_id": item.payer_id}, provider={"npi": item.npi, "tax_id": item.tax_id}, service_type=item.service_type)
+    started = datetime.now(timezone.utc)
+    req_rec = create_request_record(db, payload, "/work-items/{id}/validate", service.get_provider())
+    try:
+        response = await service.check(payload)
+        complete_request_success(db, req_rec, response, started)
+        item.needs_validation = False
+        item.validation_status = "validated"
+        item.last_validated_at = datetime.utcnow()
+        item.last_request_id = req_rec.request_id
+        db.commit()
+        db.refresh(item)
+        return {"id": item.id, "validation_status": item.validation_status, "last_request_id": item.last_request_id}
+    except RuntimeError as exc:
+        complete_request_error(db, req_rec, str(exc), started)
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/work-items/{item_id}/validate")
+async def validate_work_item(item_id: int, db: Session = Depends(get_db)) -> dict:
+    item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Not found")
+    return await _validate_work_item(item, db)
+
+
+@app.post("/work-items/validate-pending")
+async def validate_pending_work_items(db: Session = Depends(get_db)) -> dict:
+    items = db.query(VerificationWorkItem).filter(VerificationWorkItem.needs_validation.is_(True)).all()
+    validated = []
+    for item in items:
+        validated.append(await _validate_work_item(item, db))
+    return {"validated_count": len(validated), "items": validated}

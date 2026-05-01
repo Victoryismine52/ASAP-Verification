@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
 
     # Database
-    database_url: str = "sqlite:///./asap_verification.db"
+    database_url: str = "sqlite:///./data/asap_verification.db"
 
     # Optional JSON file that defines available provider connections for the UI.
     connections_config_path: str = "connections.json"
