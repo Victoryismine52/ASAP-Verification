@@ -19,6 +19,10 @@ async def test_landing_page_served():
     assert "Work Queue" in response.text
     assert "Request History" in response.text
     assert "Outbox" in response.text
+    assert "Demo Data" in response.text
+    assert "Load Demo Data" in response.text
+    assert "Delete Demo Data" in response.text
+    assert "DEMO" in response.text
     assert "Import CSV to Work Queue" in response.text
     assert "Provider Adapter Matrix" in response.text
 

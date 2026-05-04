@@ -12,7 +12,7 @@ from app.models.eligibility import EligibilityRequest, EligibilityResponse
 from app.models.persistence import IntegrationOutbox, VerificationRequest, VerificationResult, VerificationWorkItem
 
 
-def create_request_record(db: Session, request: EligibilityRequest, endpoint: str, provider_source: str) -> VerificationRequest:
+def create_request_record(db: Session, request: EligibilityRequest, endpoint: str, provider_source: str, is_demo: bool = False) -> VerificationRequest:
     rid = uuid.uuid4().hex
     rec = VerificationRequest(
         request_id=rid,
@@ -29,6 +29,7 @@ def create_request_record(db: Session, request: EligibilityRequest, endpoint: st
         service_type=request.service_type,
         raw_request_json=json.dumps(request.model_dump(mode="json")),
         status="received",
+        is_demo=is_demo,
     )
     db.add(rec)
     db.commit()
@@ -53,6 +54,7 @@ def complete_request_success(db: Session, request_rec: VerificationRequest, resp
         source=response.source,
         checked_at=response.checked_at,
         raw_response_json=json.dumps(response.model_dump(mode="json")),
+        is_demo=request_rec.is_demo,
     )
     db.add(vr)
     outbox = IntegrationOutbox(
@@ -61,6 +63,7 @@ def complete_request_success(db: Session, request_rec: VerificationRequest, resp
         target_record_type="eligibility_result",
         status="ready_for_review",
         payload_json=vr.raw_response_json,
+        is_demo=request_rec.is_demo,
     )
     db.add(outbox)
     db.commit()
@@ -80,8 +83,11 @@ def outbox_status_counts(db: Session) -> dict[str, int]:
     return {status: count for status, count in rows}
 
 
-def nextgen_csv(db: Session) -> str:
-    rows = db.query(VerificationRequest, VerificationResult).join(VerificationResult, VerificationRequest.request_id == VerificationResult.request_id).order_by(VerificationRequest.created_at.desc()).all()
+def nextgen_csv(db: Session, include_demo: bool = False) -> str:
+    q = db.query(VerificationRequest, VerificationResult).join(VerificationResult, VerificationRequest.request_id == VerificationResult.request_id)
+    if not include_demo:
+        q = q.filter(VerificationRequest.is_demo.is_(False), VerificationResult.is_demo.is_(False))
+    rows = q.order_by(VerificationRequest.created_at.desc()).all()
     out = io.StringIO()
     fields = ["patient_first_name","patient_last_name","dob","member_id","payer_name","payer_id","service_type","eligibility_status","plan_name","copay","coinsurance","deductible_remaining","out_of_pocket_remaining","authorization_required","checked_at","source","notes"]
     w = csv.DictWriter(out, fieldnames=fields)
@@ -100,7 +106,7 @@ def patient_key_for_row(first_name: str, last_name: str, dob: date, member_id: s
     return hashlib.sha256(key_raw.encode("utf-8")).hexdigest()
 
 
-def upsert_work_item_from_csv_row(db: Session, row: dict[str, str]) -> tuple[VerificationWorkItem, str]:
+def upsert_work_item_from_csv_row(db: Session, row: dict[str, str], is_demo: bool = False, source_system: str = "csv_import") -> tuple[VerificationWorkItem, str]:
     dob_value = date.fromisoformat(row["dob"])
     patient_key = patient_key_for_row(row["first_name"], row["last_name"], dob_value, row["member_id"], row["payer_id"])
     existing = db.query(VerificationWorkItem).filter(VerificationWorkItem.patient_key == patient_key).first()
@@ -118,8 +124,11 @@ def upsert_work_item_from_csv_row(db: Session, row: dict[str, str]) -> tuple[Ver
     item.needs_validation = True
     item.validation_status = "needs_revalidation" if existing else "pending_validation"
     item.source_method = "csv_upload"
+    item.is_demo = is_demo
     if not existing:
         db.add(item)
+    if source_system:
+        item.source_system = source_system
     db.commit()
     db.refresh(item)
     return item, action

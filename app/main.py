@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
 from pathlib import Path
 
@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.db import Base, engine, get_db
 from app.models.persistence import IntegrationOutbox, VerificationRequest, VerificationResult, VerificationWorkItem
 from app.services.persistence_service import complete_request_error, complete_request_success, create_request_record, nextgen_csv, outbox_status_counts, patient_key_for_row, upsert_work_item_from_csv_row
+from app.services.demo_data_service import load_demo_data, delete_demo_data, demo_data_counts
 from app.utils.logging import configure_logging
 
 # Configure structured logging before anything else
@@ -76,15 +77,16 @@ async def landing_page() -> str:
 <!doctype html><html><head><meta charset='utf-8'/><title>ASAP Verification Console</title>
 <style>body{font-family:Arial;margin:1rem auto;max-width:1400px}.tabs button{margin-right:.4rem}.tab{display:none}.tab.active{display:block}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{border:1px solid #ddd;padding:4px}</style>
 </head><body>
-<h1>ASAP Verification Operations Console</h1>
+<h1>ASAP Verification Operations Console</h1><div><span style='background:#ccc;padding:2px 6px'>DEMO</span></div>
 <div class='tabs'>
-<button onclick="showTab('dashboard')">Dashboard</button><button onclick="showTab('workqueue')">Work Queue</button><button onclick="showTab('history')">Request History</button><button onclick="showTab('outbox')">Outbox</button><button onclick="showTab('exports')">Exports</button><button onclick="showTab('providers')">Providers</button><button onclick="showTab('manual')">Manual Test</button>
+<button onclick="showTab('dashboard')">Dashboard</button><button onclick="showTab('workqueue')">Work Queue</button><button onclick="showTab('history')">Request History</button><button onclick="showTab('outbox')">Outbox</button><button onclick="showTab('exports')">Exports</button><button onclick="showTab('providers')">Providers</button><button onclick="showTab('manual')">Manual Test</button><button onclick="showTab('demodata')">Demo Data</button>
 </div>
 <div id='dashboard' class='tab active'><h2>Dashboard</h2><pre id='dash'></pre><button onclick='validatePending()'>Validate Pending</button><a href='/work-items/export.csv'>Export Work Queue CSV</a></div>
 <div id='workqueue' class='tab'><h2>Work Queue</h2><input id='work-status' placeholder='status filter'/><button onclick='loadWork()'>Refresh</button><button onclick='validatePending()'>Validate Pending</button><input id='csv-file' type='file' accept='.csv'/><button onclick='importCsv()'>Import CSV to Work Queue</button><pre id='import-result'></pre><table id='work-table'></table></div>
 <div id='history' class='tab'><h2>Request History</h2><button onclick='loadHistory()'>Refresh</button><table id='hist-table'></table></div>
 <div id='outbox' class='tab'><h2>Outbox</h2><button onclick='loadOutbox()'>Refresh</button><a href='/outbox/export.csv'>Export CSV</a><table id='outbox-table'></table></div>
 <div id='exports' class='tab'><h2>Exports</h2><ul><li><a href='/exports/nextgen/eligibility-results.csv'>Download NextGen Eligibility CSV</a></li><li><a href='/history/export.csv'>Download History CSV</a></li><li><a href='/work-items/export.csv'>Download Work Queue CSV</a></li><li><a href='/outbox/export.csv'>Download Outbox CSV</a></li></ul></div>
+<div id='demodata' class='tab'><h2>Demo Data</h2><button onclick='loadDemoData()'>Load Demo Data</button><button onclick='deleteDemoData()'>Delete Demo Data</button><p>Demo data is flagged with is_demo=true and excluded from operational exports by default.</p><pre id='demo-counts'></pre></div>
 <div id='providers' class='tab'><h2>Providers</h2><h3>Provider Adapter Matrix</h3><select id='provider'></select><button id='switch-btn'>Switch</button><pre id='details'></pre><div id='adapter-matrix'></div></div>
 <div id='manual' class='tab'><h2>Manual Test</h2><textarea id='payload' rows='12' style='width:100%'></textarea><button id='test-btn'>Run Test Call</button><pre id='test-result'></pre></div>
 <script>
@@ -103,8 +105,11 @@ async function editBeforeRerun(id){const d=await fetch(`/history/${id}`).then(r=
 async function loadOutbox(){const o=await fetch('/outbox').then(r=>r.json());let html='<tr><th>id</th><th>request_id</th><th>target_system</th><th>target_record_type</th><th>status</th><th>created_at</th><th>actions</th></tr>';for(const i of o.items){html+=`<tr><td>${i.id}</td><td>${i.request_id}</td><td>${i.target_system}</td><td>${i.target_record_type}</td><td>${i.status}</td><td>${i.created_at}</td><td><button onclick='updateOutbox(${i.id})'>Update Status</button><button onclick='viewOutbox(${i.id})'>View Payload</button></td></tr>`}document.getElementById('outbox-table').innerHTML=html;}
 async function updateOutbox(id){const status=prompt('status: ready_for_review/exported/posted/failed','exported');if(!status)return;await fetch(`/outbox/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});loadOutbox();dashboard();}
 async function viewOutbox(id){alert(JSON.stringify(await fetch(`/outbox/${id}`).then(r=>r.json()),null,2));}
+async function loadDemoCounts(){document.getElementById('demo-counts').textContent=JSON.stringify(await fetch('/demo/counts').then(r=>r.json()),null,2)}
+async function loadDemoData(){await fetch('/demo/load',{method:'POST'});await loadDemoCounts();await loadWork();}
+async function deleteDemoData(){await fetch('/demo/delete',{method:'DELETE'});await loadDemoCounts();await loadWork();}
 document.getElementById('test-btn').onclick=async()=>{const p=JSON.parse(document.getElementById('payload').value);const r=await fetch('/ui/test-call',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});document.getElementById('test-result').textContent=JSON.stringify(await r.json(),null,2)};
-(async()=>{document.getElementById('payload').value=JSON.stringify({patient:{first_name:'Jane',last_name:'Doe',dob:'1985-06-15',member_id:'MBR123456'},payer:{name:'Blue Cross Blue Shield',payer_id:'BCBS001'},provider:{npi:'1234567890',tax_id:'12-3456789'},service_type:'30'},null,2);await dashboard();await loadWork();await loadHistory();await loadOutbox();const matrix=await fetch('/ui/provider-matrix').then(r=>r.json());document.getElementById('adapter-matrix').textContent=JSON.stringify(matrix.providers,null,2);})();
+(async()=>{document.getElementById('payload').value=JSON.stringify({patient:{first_name:'Jane',last_name:'Doe',dob:'1985-06-15',member_id:'MBR123456'},payer:{name:'Blue Cross Blue Shield',payer_id:'BCBS001'},provider:{npi:'1234567890',tax_id:'12-3456789'},service_type:'30'},null,2);await dashboard();await loadWork();await loadHistory();await loadOutbox();await loadDemoCounts();const matrix=await fetch('/ui/provider-matrix').then(r=>r.json());document.getElementById('adapter-matrix').textContent=JSON.stringify(matrix.providers,null,2);})();
 </script></body></html>"""
 
 
@@ -161,10 +166,30 @@ async def ui_provider_matrix() -> dict:
     return {"providers": PROVIDER_ADAPTER_MATRIX}
 
 
+@app.post("/demo/load")
+async def demo_load(db: Session = Depends(get_db)) -> dict:
+    return load_demo_data(db)
+
+
+@app.delete("/demo/delete")
+async def demo_delete(db: Session = Depends(get_db)) -> dict:
+    return delete_demo_data(db)
+
+
+@app.get("/demo/counts")
+async def demo_counts(db: Session = Depends(get_db)) -> dict:
+    return demo_data_counts(db)
+
+
 @app.get("/history")
-async def history(db: Session = Depends(get_db)) -> dict:
-    rows = db.query(VerificationRequest).order_by(VerificationRequest.created_at.desc()).limit(25).all()
-    return {"items": [{"request_id": r.request_id, "patient": f"{r.patient_first_name} {r.patient_last_name}", "payer": f"{r.payer_name} ({r.payer_id})", "service_type": r.service_type, "status": r.status, "provider_source": r.provider_source, "created_at": r.created_at.isoformat(), "duration_ms": r.duration_ms, "error_message": r.error_message} for r in rows]}
+async def history(demo: str = "all", db: Session = Depends(get_db)) -> dict:
+    q = db.query(VerificationRequest)
+    if demo == "only":
+        q = q.filter(VerificationRequest.is_demo.is_(True))
+    elif demo == "exclude":
+        q = q.filter(VerificationRequest.is_demo.is_(False))
+    rows = q.order_by(VerificationRequest.created_at.desc()).limit(25).all()
+    return {"items": [{"request_id": r.request_id, "patient": f"{r.patient_first_name} {r.patient_last_name}", "payer": f"{r.payer_name} ({r.payer_id})", "service_type": r.service_type, "status": r.status, "provider_source": r.provider_source, "created_at": r.created_at.isoformat(), "duration_ms": r.duration_ms, "error_message": r.error_message, "is_demo": r.is_demo} for r in rows]}
 
 
 @app.get("/history/{request_id}")
@@ -187,13 +212,13 @@ async def rerun(request_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/history/export.csv", response_class=PlainTextResponse)
-async def history_export(db: Session = Depends(get_db)) -> str:
-    return nextgen_csv(db)
+async def history_export(include_demo: bool = False, db: Session = Depends(get_db)) -> str:
+    return nextgen_csv(db, include_demo=include_demo)
 
 
 @app.get("/exports/nextgen/eligibility-results.csv", response_class=PlainTextResponse)
-async def nextgen_export(db: Session = Depends(get_db)) -> str:
-    return nextgen_csv(db)
+async def nextgen_export(include_demo: bool = False, db: Session = Depends(get_db)) -> str:
+    return nextgen_csv(db, include_demo=include_demo)
 
 
 @app.get("/ui/outbox-status", include_in_schema=False)
@@ -202,34 +227,46 @@ async def ui_outbox_status(db: Session = Depends(get_db)) -> dict:
 
 
 @app.post("/work-items/import.csv")
-async def import_work_items_csv(file: UploadFile = File(...), db: Session = Depends(get_db)) -> dict:
+async def import_work_items_csv(file: UploadFile = File(...), is_demo: bool = False, db: Session = Depends(get_db)) -> dict:
     content = await file.read()
     text = content.decode("utf-8")
     rows = csv.DictReader(io.StringIO(text))
     inserted = 0
     updated = 0
     failed = 0
+    errors = []
     for idx, row in enumerate(rows, start=2):
         try:
-            item, action = upsert_work_item_from_csv_row(db, row)
+            item, action = upsert_work_item_from_csv_row(db, row, is_demo=is_demo)
             item.source_file_name = file.filename
             item.source_system = "csv_import"
             item.source_row_number = idx
             db.commit()
             if action == "inserted": inserted += 1
             else: updated += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
-    return {"inserted": inserted, "updated": updated, "failed": failed}
+            errors.append({"row_number": idx, "member_id": row.get("member_id"), "error": str(exc)})
+    return {"inserted": inserted, "updated": updated, "failed": failed, "errors": errors}
+
+
+@app.post("/work-items")
+async def create_or_upsert_work_item(payload: dict, db: Session = Depends(get_db)) -> dict:
+    item, _ = upsert_work_item_from_csv_row(db, payload, is_demo=bool(payload.get("is_demo", False)), source_system="manual_entry")
+    return await get_work_item(item.id, db)
 
 
 @app.get("/work-items")
-async def list_work_items(status: str | None = None, db: Session = Depends(get_db)) -> dict:
+async def list_work_items(status: str | None = None, demo: str = "all", db: Session = Depends(get_db)) -> dict:
     q = db.query(VerificationWorkItem)
     if status:
         q = q.filter(VerificationWorkItem.validation_status == status)
+    if demo == "only":
+        q = q.filter(VerificationWorkItem.is_demo.is_(True))
+    elif demo == "exclude":
+        q = q.filter(VerificationWorkItem.is_demo.is_(False))
     items = q.order_by(VerificationWorkItem.created_at.desc()).all()
-    return {"items": [{"id": i.id, "patient_key": i.patient_key, "first_name": i.first_name, "last_name": i.last_name, "dob": i.dob.isoformat(), "member_id": i.member_id, "payer_name": i.payer_name, "payer_id": i.payer_id, "service_type": i.service_type, "validation_status": i.validation_status, "needs_validation": i.needs_validation, "last_validated_at": i.last_validated_at.isoformat() if i.last_validated_at else None, "last_request_id": i.last_request_id, "updated_at": i.updated_at.isoformat()} for i in items]}
+    return {"items": [{"id": i.id, "patient_key": i.patient_key, "first_name": i.first_name, "last_name": i.last_name, "dob": i.dob.isoformat(), "member_id": i.member_id, "payer_name": i.payer_name, "payer_id": i.payer_id, "service_type": i.service_type, "validation_status": i.validation_status, "needs_validation": i.needs_validation, "last_validated_at": i.last_validated_at.isoformat() if i.last_validated_at else None, "last_request_id": i.last_request_id, "updated_at": i.updated_at.isoformat(), "source_system": i.source_system, "source_file_name": i.source_file_name, "source_row_number": i.source_row_number, "notes": i.notes, "manual_override_reason": i.manual_override_reason, "last_error_message": i.last_error_message, "created_at": i.created_at.isoformat(), "is_demo": i.is_demo} for i in items]}
 
 
 @app.get("/work-items/{item_id:int}")
@@ -237,7 +274,7 @@ async def get_work_item(item_id: int, db: Session = Depends(get_db)) -> dict:
     item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
-    return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id}
+    return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo}
 
 
 @app.patch("/work-items/{item_id:int}")
@@ -246,14 +283,18 @@ async def patch_work_item(item_id: int, payload: dict, db: Session = Depends(get
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
     identity_before = (item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
-    for f in ["first_name","last_name","member_id","payer_name","payer_id","npi","tax_id","service_type","notes"]:
+    for f in ["first_name","last_name","member_id","payer_name","payer_id","npi","tax_id","service_type","notes","manual_override_reason","source_system","source_file_name","source_row_number"]:
         if f in payload:
             setattr(item, f, payload[f])
     if "dob" in payload:
         item.dob = datetime.fromisoformat(payload["dob"]).date()
     identity_after = (item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
     if identity_before != identity_after:
-        item.patient_key = patient_key_for_row(item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
+        new_key = patient_key_for_row(item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
+        collision = db.query(VerificationWorkItem).filter(VerificationWorkItem.patient_key == new_key, VerificationWorkItem.id != item.id).first()
+        if collision:
+            raise HTTPException(status_code=409, detail="patient_key collision")
+        item.patient_key = new_key
     item.needs_validation = True
     item.validation_status = "needs_revalidation"
     db.commit()
@@ -264,7 +305,7 @@ async def patch_work_item(item_id: int, payload: dict, db: Session = Depends(get
 async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
     payload = EligibilityRequest(patient={"first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id}, payer={"name": item.payer_name, "payer_id": item.payer_id}, provider={"npi": item.npi, "tax_id": item.tax_id}, service_type=item.service_type)
     started = datetime.now(timezone.utc)
-    req_rec = create_request_record(db, payload, "/work-items/{id}/validate", service.get_provider())
+    req_rec = create_request_record(db, payload, "/work-items/{id}/validate", service.get_provider(), is_demo=item.is_demo)
     try:
         response = await service.check(payload)
         complete_request_success(db, req_rec, response, started)
@@ -274,9 +315,13 @@ async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
         item.last_request_id = req_rec.request_id
         db.commit()
         db.refresh(item)
-        return {"id": item.id, "validation_status": item.validation_status, "last_request_id": item.last_request_id}
+        return {"id": item.id, "validation_status": item.validation_status, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo}
     except RuntimeError as exc:
         complete_request_error(db, req_rec, str(exc), started)
+        item.validation_status = "failed"
+        item.needs_validation = True
+        item.last_error_message = str(exc)
+        db.commit()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
@@ -298,8 +343,11 @@ async def validate_pending_work_items(db: Session = Depends(get_db)) -> dict:
 
 
 @app.get("/work-items/export.csv", response_class=PlainTextResponse)
-async def export_work_items_csv(db: Session = Depends(get_db)) -> str:
-    items = db.query(VerificationWorkItem).order_by(VerificationWorkItem.created_at.desc()).all()
+async def export_work_items_csv(include_demo: bool = False, db: Session = Depends(get_db)) -> str:
+    q = db.query(VerificationWorkItem)
+    if not include_demo:
+        q = q.filter(VerificationWorkItem.is_demo.is_(False))
+    items = q.order_by(VerificationWorkItem.created_at.desc()).all()
     out = io.StringIO()
     fields = ["id","first_name","last_name","dob","member_id","payer_name","payer_id","service_type","validation_status","needs_validation","last_validated_at","last_request_id","updated_at"]
     w = csv.DictWriter(out, fieldnames=fields)
@@ -310,8 +358,11 @@ async def export_work_items_csv(db: Session = Depends(get_db)) -> str:
 
 
 @app.get("/outbox")
-async def outbox_list(db: Session = Depends(get_db)) -> dict:
-    rows = db.query(IntegrationOutbox).order_by(IntegrationOutbox.created_at.desc()).limit(100).all()
+async def outbox_list(demo: str = "all", db: Session = Depends(get_db)) -> dict:
+    q = db.query(IntegrationOutbox)
+    if demo == "only": q = q.filter(IntegrationOutbox.is_demo.is_(True))
+    elif demo == "exclude": q = q.filter(IntegrationOutbox.is_demo.is_(False))
+    rows = q.order_by(IntegrationOutbox.created_at.desc()).limit(100).all()
     return {"status_counts": outbox_status_counts(db), "items": [{"id": r.id, "request_id": r.request_id, "target_system": r.target_system, "target_record_type": r.target_record_type, "status": r.status, "created_at": r.created_at.isoformat()} for r in rows]}
 
 
@@ -334,8 +385,11 @@ async def outbox_patch(id: int, payload: dict, db: Session = Depends(get_db)) ->
 
 
 @app.get("/outbox/export.csv", response_class=PlainTextResponse)
-async def outbox_export(db: Session = Depends(get_db)) -> str:
-    rows = db.query(IntegrationOutbox).order_by(IntegrationOutbox.created_at.desc()).all()
+async def outbox_export(include_demo: bool = False, db: Session = Depends(get_db)) -> str:
+    q = db.query(IntegrationOutbox)
+    if not include_demo:
+        q = q.filter(IntegrationOutbox.is_demo.is_(False))
+    rows = q.order_by(IntegrationOutbox.created_at.desc()).all()
     out = io.StringIO()
     fields = ["id","request_id","target_system","target_record_type","status","created_at"]
     w = csv.DictWriter(out, fieldnames=fields)
