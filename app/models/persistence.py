@@ -30,6 +30,7 @@ class VerificationRequest(Base):
     status: Mapped[str] = mapped_column(String(50), default="received")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -53,6 +54,7 @@ class VerificationResult(Base):
     checked_at: Mapped[datetime] = mapped_column(DateTime)
     raw_response_json: Mapped[str] = mapped_column(Text)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
 
     request: Mapped[VerificationRequest] = relationship(back_populates="result")
 
@@ -67,6 +69,7 @@ class IntegrationOutbox(Base):
     status: Mapped[str] = mapped_column(String(64))
     payload_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class VerificationWorkItem(Base):
@@ -97,4 +100,5 @@ class VerificationWorkItem(Base):
     last_validated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_request_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
