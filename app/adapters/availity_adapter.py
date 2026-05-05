@@ -30,7 +30,7 @@ class AvailityAdapter(BaseEligibilityAdapter):
             "base_url": settings.availity_base_url,
             "access_requirements": "Availity client ID/secret and approved app",
             "supported_transaction": "X12 270/271",
-            "notes": "OAuth token call is live; coverage API calls Availity /coverages demo endpoint.",
+            "notes": "OAuth token call is live; coverage API calls Availity /coverages using the configured client credentials and scope.",
         }
 
     @staticmethod
