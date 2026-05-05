@@ -145,6 +145,7 @@ async def test_validate_selected_validates_selected_ids():
         assert data["validated_count"] == 2
         assert data["failed_count"] == 0
         assert len(data["results"]) == 2
+        assert all(item.get("request_id") for item in data["results"])
 
 
 @pytest.mark.asyncio

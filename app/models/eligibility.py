@@ -2,7 +2,7 @@
 Pydantic models for eligibility check requests and responses.
 """
 from datetime import date, datetime
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -50,3 +50,5 @@ class EligibilityResponse(BaseModel):
     authorization_required: bool = Field(..., json_schema_extra={"example": False})
     source: str = Field(..., json_schema_extra={"example": "mock"})
     checked_at: datetime = Field(..., json_schema_extra={"example": "2026-01-01T12:00:00Z"})
+    raw_response_json: Any | None = Field(default=None)
+    error_message: Optional[str] = Field(default=None)

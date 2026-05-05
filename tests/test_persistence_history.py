@@ -29,6 +29,10 @@ async def test_eligibility_is_persisted_and_history_and_exports():
         history = await client.get("/history")
         assert history.status_code == 200
         assert len(history.json()["items"]) >= 1
+        request_id = history.json()["items"][0]["request_id"]
+        history_detail = await client.get(f"/history/{request_id}")
+        assert history_detail.status_code == 200
+        assert history_detail.json()["result"]["raw_response_json"] is not None
 
         csv_resp = await client.get("/exports/nextgen/eligibility-results.csv")
         assert csv_resp.status_code == 200
