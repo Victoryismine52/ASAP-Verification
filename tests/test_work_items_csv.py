@@ -117,6 +117,12 @@ async def test_work_item_export_csv_and_outbox_status_update():
         exp = await client.get("/work-items/export.csv")
         assert exp.status_code == 200
         assert "first_name,last_name" in exp.text
+        factory_exp = await client.get("/exports/factory/results.csv", params={"include_demo": "true"})
+        assert factory_exp.status_code == 200
+        assert "work_item_id,patient_name,dob,member_id" in factory_exp.text
+        assert "request_payload_json" in factory_exp.text
+        assert "response_payload_json" in factory_exp.text
+        assert "Jane Doe" in factory_exp.text
         outbox = await client.get("/outbox")
         assert outbox.status_code == 200
         assert len(outbox.json()["items"]) >= 1
