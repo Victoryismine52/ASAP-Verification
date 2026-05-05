@@ -18,9 +18,9 @@ async def test_landing_page_served():
     assert "Dashboard" in response.text
     assert "API Factory Demo" in response.text
     assert "Load Unknown Demo Patients" in response.text
-    assert "Preview Request JSON" in response.text
+    assert "Preview Request JSON" not in response.text
     assert "API Response Payload" in response.text
-    assert "Send Selected" in response.text
+    assert "Send Selected" not in response.text
     assert "Send All Pending" in response.text
     assert "Load patients" in response.text
     assert "Make JSON" in response.text
@@ -41,7 +41,9 @@ async def test_landing_page_served():
     assert "Import CSV to Work Queue" in response.text
     assert "Provider Adapter Matrix" in response.text
     assert "Verification Source" in response.text
-    assert "Service Action" in response.text
+    assert "Verification Source Status" in response.text
+    assert "Export Results CSV" in response.text
+    assert "Check Type" in response.text
     assert "Form View" in response.text
     assert "Raw JSON" in response.text
     assert "Sync Form to JSON" in response.text
