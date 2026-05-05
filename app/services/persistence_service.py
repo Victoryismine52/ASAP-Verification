@@ -53,7 +53,8 @@ def complete_request_success(db: Session, request_rec: VerificationRequest, resp
         authorization_required=response.authorization_required,
         source=response.source,
         checked_at=response.checked_at,
-        raw_response_json=json.dumps(response.model_dump(mode="json")),
+        raw_response_json=json.dumps(response.raw_response_json if response.raw_response_json is not None else response.model_dump(mode="json")),
+        notes=response.error_message,
         is_demo=request_rec.is_demo,
     )
     db.add(vr)

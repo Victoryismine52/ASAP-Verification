@@ -3,6 +3,7 @@
 import pytest
 
 from app.adapters.availity_adapter import AvailityAdapter
+from app.models.eligibility import EligibilityRequest
 
 
 class _FakeResponse:
@@ -97,3 +98,17 @@ async def test_get_access_token_http_error_includes_oauth_context(monkeypatch):
 
     with pytest.raises(RuntimeError, match="grant_type=client_credentials"):
         await adapter._get_access_token()
+
+
+@pytest.mark.asyncio
+async def test_availity_check_preserves_raw_payload_when_unconfigured():
+    adapter = AvailityAdapter()
+    req = EligibilityRequest(
+        patient={"first_name": "Jane", "last_name": "Doe", "dob": "1985-06-15", "member_id": "X"},
+        payer={"name": "Aetna", "payer_id": "AET001"},
+        provider={"npi": "1234567890", "tax_id": "12-3456789"},
+        service_type="30",
+    )
+    result = await adapter.check_eligibility(req)
+    assert result.source == "availity"
+    assert result.raw_response_json is not None

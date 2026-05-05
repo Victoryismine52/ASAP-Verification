@@ -132,6 +132,12 @@ class AvailityAdapter(BaseEligibilityAdapter):
                 authorization_required=True,
                 source="availity",
                 checked_at=datetime.now(tz=timezone.utc),
+                raw_response_json={
+                    "provider": "availity",
+                    "error": "missing_credentials",
+                    "message": "Missing AVAILITY_CLIENT_ID or AVAILITY_CLIENT_SECRET",
+                },
+                error_message="Availity credentials are not configured",
             )
 
         token = await self._get_access_token()
@@ -147,4 +153,5 @@ class AvailityAdapter(BaseEligibilityAdapter):
             authorization_required=raw.get("authorizationRequired", False),
             source="availity",
             checked_at=datetime.now(tz=timezone.utc),
+            raw_response_json=raw,
         )
