@@ -28,7 +28,7 @@ _ADAPTER_BUILDERS: dict[str, Callable[[], BaseEligibilityAdapter]] = {
 
 PROVIDER_ADAPTER_MATRIX = [
     {"provider": "mock", "coverage_type": "Simulated", "real_time_support": "Yes (mocked)", "access_needed": "None", "best_use": "Local development and CI"},
-    {"provider": "availity", "coverage_type": "Commercial and payer network", "real_time_support": "Token live; eligibility scaffold", "access_needed": "Availity app credentials", "best_use": "Availity-connected workflows"},
+    {"provider": "availity", "coverage_type": "Commercial and payer network", "real_time_support": "OAuth live; /coverages API call", "access_needed": "Availity app credentials", "best_use": "Availity-connected workflows"},
     {"provider": "stedi", "coverage_type": "Multi-payer EDI gateway", "real_time_support": "Scaffolded", "access_needed": "Stedi API key + enrollment", "best_use": "Unified EDI integrations"},
     {"provider": "optum_change", "coverage_type": "Commercial + clearinghouse", "real_time_support": "Scaffolded", "access_needed": "Client credentials + trading partner", "best_use": "Enterprise clearinghouse connectivity"},
     {"provider": "cms_hets", "coverage_type": "Medicare", "real_time_support": "Scaffolded", "access_needed": "HETS submitter account", "best_use": "Medicare beneficiary checks"},
