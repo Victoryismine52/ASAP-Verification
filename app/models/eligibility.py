@@ -2,7 +2,7 @@
 Pydantic models for eligibility check requests and responses.
 """
 from datetime import date, datetime
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -41,7 +41,7 @@ class EligibilityRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 class EligibilityResponse(BaseModel):
-    status: Literal["active", "inactive"] = Field(..., json_schema_extra={"example": "active"})
+    status: str = Field(..., json_schema_extra={"example": "active"})
     plan_name: str = Field(..., json_schema_extra={"example": "PPO Gold Plan"})
     copay: Optional[float] = Field(None, json_schema_extra={"example": 30.0})
     coinsurance: Optional[float] = Field(None, json_schema_extra={"example": 0.20})
