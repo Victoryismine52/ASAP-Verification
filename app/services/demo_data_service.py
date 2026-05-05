@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any
-from datetime import date, datetime
+from datetime import date
 
 from sqlalchemy.orm import Session
 
@@ -27,32 +27,14 @@ def load_demo_data(db: Session) -> dict:
             continue
         payload = {k: v for k, v in row.items() if k != 'patient_key'}
         payload['dob'] = date.fromisoformat(payload['dob'])
+        payload['validation_status'] = 'pending_validation'
+        payload['needs_validation'] = True
+        payload['last_validated_at'] = None
+        payload['last_request_id'] = None
+        payload['last_error_message'] = None
         item = VerificationWorkItem(patient_key=key, is_demo=True, **payload)
         db.add(item)
         stats['work_items']['inserted'] += 1
-    for row in seed.get('requests', []):
-        if db.query(VerificationRequest).filter_by(request_id=row['request_id']).first():
-            stats['requests']['skipped'] += 1
-            continue
-        row = dict(row)
-        row['patient_dob'] = date.fromisoformat(row['patient_dob'])
-        db.add(VerificationRequest(is_demo=True, **row))
-        stats['requests']['inserted'] += 1
-    for row in seed.get('results', []):
-        if db.query(VerificationResult).filter_by(request_id=row['request_id']).first():
-            stats['results']['skipped'] += 1
-            continue
-        row = dict(row)
-        row['checked_at'] = datetime.fromisoformat(row['checked_at'])
-        db.add(VerificationResult(is_demo=True, **row))
-        stats['results']['inserted'] += 1
-    for row in seed.get('outbox', []):
-        exists = db.query(IntegrationOutbox).filter_by(request_id=row['request_id'], target_system=row['target_system'], status=row['status']).first()
-        if exists:
-            stats['outbox']['skipped'] += 1
-            continue
-        db.add(IntegrationOutbox(is_demo=True, **row))
-        stats['outbox']['inserted'] += 1
     db.commit()
     return stats
 
