@@ -16,13 +16,16 @@ async def test_landing_page_served():
         response = await client.get("/")
     assert response.status_code == 200
     assert "Dashboard" in response.text
+    assert "ASAP Verification Console" in response.text
+    assert "Standalone verification workbench" in response.text
+    assert "Active Verification Source" in response.text
     assert "Work Queue" in response.text
     assert "Request History" in response.text
     assert "Outbox" in response.text
     assert "Demo Data" in response.text
     assert "Load Demo Data" in response.text
     assert "Delete Demo Data" in response.text
-    assert "DEMO" in response.text
+    assert "Prototype / Mock Mode" in response.text
     assert "Import CSV to Work Queue" in response.text
     assert "Provider Adapter Matrix" in response.text
 
