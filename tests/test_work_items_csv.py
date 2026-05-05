@@ -124,3 +124,43 @@ async def test_work_item_export_csv_and_outbox_status_update():
         upd = await client.patch(f"/outbox/{outbox_id}", json={"status": "exported"})
         assert upd.status_code == 200
         assert upd.json()["status"] == "exported"
+
+
+@pytest.mark.asyncio
+async def test_validate_selected_validates_selected_ids():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    csv_text = CSV_HEADER + (
+        "Jane,Doe,1985-06-15,MBR123456,Blue Cross,BCBS001,1234567890,12-3456789,30\n"
+        "John,Doe,1980-02-15,MBR999999,Aetna,AET001,1234567890,12-3456789,30\n"
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/work-items/import.csv", files={"file": ("patients.csv", csv_text, "text/csv")})
+        items = (await client.get("/work-items")).json()["items"]
+        ids = [i["id"] for i in items]
+        res = await client.post("/work-items/validate-selected", json={"ids": ids, "provider": "mock"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["requested_count"] == 2
+        assert data["validated_count"] == 2
+        assert data["failed_count"] == 0
+        assert len(data["results"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_validate_selected_returns_per_item_failures_without_stopping_batch():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    csv_text = CSV_HEADER + "Jane,Doe,1985-06-15,MBR123456,Blue Cross,BCBS001,1234567890,12-3456789,30\n"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/work-items/import.csv", files={"file": ("patients.csv", csv_text, "text/csv")})
+        item_id = (await client.get("/work-items")).json()["items"][0]["id"]
+        res = await client.post("/work-items/validate-selected", json={"ids": [item_id, 999999], "provider": "mock"})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["requested_count"] == 2
+        assert data["validated_count"] == 1
+        assert data["failed_count"] == 1
+        by_id = {r["id"]: r for r in data["results"]}
+        assert by_id[item_id]["status"] == "validated"
+        assert by_id[999999]["status"] == "failed"
