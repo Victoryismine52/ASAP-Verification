@@ -16,10 +16,15 @@ async def test_landing_page_served():
         response = await client.get("/")
     assert response.status_code == 200
     assert "Dashboard" in response.text
-    assert "Live Verification Demo" in response.text
-    assert "Load Demo Patients" in response.text
-    assert "Validate Selected" in response.text
-    assert "Validate All Pending" in response.text
+    assert "API Factory Demo" in response.text
+    assert "Load Unknown Demo Patients" in response.text
+    assert "Preview Request JSON" in response.text
+    assert "Send Selected" in response.text
+    assert "Send All Pending" in response.text
+    assert "Load patients" in response.text
+    assert "Make JSON" in response.text
+    assert "Send to API" in response.text
+    assert "Get answer" in response.text
     assert "Run Full Demo" not in response.text
     assert "Activity Log" in response.text
     assert "ASAP Verification Console" in response.text
