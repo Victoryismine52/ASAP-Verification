@@ -28,6 +28,12 @@ async def test_landing_page_served():
     assert "Prototype / Mock Mode" in response.text
     assert "Import CSV to Work Queue" in response.text
     assert "Provider Adapter Matrix" in response.text
+    assert "Verification Source" in response.text
+    assert "Service Action" in response.text
+    assert "Form View" in response.text
+    assert "Raw JSON" in response.text
+    assert "Sync Form to JSON" in response.text
+    assert "Sync JSON to Form" in response.text
 
 
 @pytest.mark.asyncio
