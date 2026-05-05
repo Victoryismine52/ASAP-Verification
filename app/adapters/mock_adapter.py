@@ -22,6 +22,33 @@ class MockAdapter(BaseEligibilityAdapter):
         }
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
+        member_id = (request.patient.member_id or "").strip().upper()
+        if member_id == "D003":
+            raise RuntimeError("Demo payer returned member not found")
+        if member_id == "D002":
+            return EligibilityResponse(
+                status="active",
+                plan_name="Mock Auth Required Plan",
+                copay=45.0,
+                coinsurance=0.25,
+                deductible_remaining=850.0,
+                out_of_pocket_remaining=2600.0,
+                authorization_required=True,
+                source="mock",
+                checked_at=datetime.now(tz=timezone.utc),
+            )
+        if member_id == "D004":
+            return EligibilityResponse(
+                status="active",
+                plan_name="Mock HDHP Plan",
+                copay=0.0,
+                coinsurance=0.1,
+                deductible_remaining=3200.0,
+                out_of_pocket_remaining=6000.0,
+                authorization_required=False,
+                source="mock",
+                checked_at=datetime.now(tz=timezone.utc),
+            )
         return EligibilityResponse(
             status="active",
             plan_name="Mock PPO Gold Plan",
