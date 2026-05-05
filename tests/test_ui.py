@@ -19,7 +19,7 @@ async def test_landing_page_served():
     assert "API Factory Demo" in response.text
     assert "Load Unknown Demo Patients" in response.text
     assert "Preview Request JSON" in response.text
-    assert "Latest Response Payload" in response.text
+    assert "API Response Payload" in response.text
     assert "Send Selected" in response.text
     assert "Send All Pending" in response.text
     assert "Load patients" in response.text
