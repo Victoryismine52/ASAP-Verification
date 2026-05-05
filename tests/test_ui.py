@@ -16,6 +16,15 @@ async def test_landing_page_served():
         response = await client.get("/")
     assert response.status_code == 200
     assert "Dashboard" in response.text
+    assert "Demo Tour" in response.text
+    assert "Verification Factory Tour" in response.text
+    assert "Load Demo Patients" in response.text
+    assert "Run Next Step" in response.text
+    assert "Run Full Demo" in response.text
+    assert "Activity Feed" in response.text
+    assert "Clean Pass" in response.text
+    assert "Authorization Required" in response.text
+    assert "Needs Correction" in response.text
     assert "ASAP Verification Console" in response.text
     assert "Standalone verification workbench" in response.text
     assert "Active Verification Source" in response.text
