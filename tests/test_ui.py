@@ -55,6 +55,8 @@ async def test_landing_page_served():
     assert "Sync Form to JSON" in response.text
     assert "Sync JSON to Form" in response.text
     assert "external_patient_id" in response.text
+    assert "API responded; eligibility requires review" in response.text
+    assert "last_error_message" in response.text
 
 
 def test_env_example_contains_safe_placeholders():

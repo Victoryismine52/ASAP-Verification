@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -9,6 +10,8 @@ os.environ["DATABASE_URL"] = "sqlite:///./test_asap.db"
 from app.main import app  # noqa: E402
 from app.db import Base, engine, SessionLocal  # noqa: E402
 from app.models.persistence import VerificationWorkItem  # noqa: E402
+from app.models.eligibility import EligibilityResponse  # noqa: E402
+import app.main as main_module  # noqa: E402
 
 
 CSV_HEADER = "first_name,last_name,dob,member_id,payer_name,payer_id,npi,tax_id,service_type\n"
@@ -192,3 +195,87 @@ async def test_validate_selected_returns_per_item_failures_without_stopping_batc
         by_id = {r["id"]: r for r in data["results"]}
         assert by_id[item_id]["status"] == "validated"
         assert by_id[999999]["status"] == "failed"
+
+
+def _mock_response(status="active", error_message=None):
+    return EligibilityResponse(
+        status=status,
+        plan_name="Mock Test Plan",
+        copay=25.0 if status == "active" else None,
+        coinsurance=0.2 if status == "active" else None,
+        deductible_remaining=500.0 if status == "active" else None,
+        out_of_pocket_remaining=1500.0 if status == "active" else None,
+        authorization_required=False,
+        source="mock",
+        checked_at=datetime.now(tz=timezone.utc),
+        raw_response_json={"status": status, "error_message": error_message},
+        error_message=error_message,
+    )
+
+
+async def _create_one_work_item(client, member_id="MBR123456"):
+    csv_text = CSV_HEADER + f"Jane,Doe,1985-06-15,{member_id},Blue Cross,BCBS001,1234567890,12-3456789,30\n"
+    await client.post("/work-items/import.csv", files={"file": ("patients.csv", csv_text, "text/csv")})
+    return (await client.get("/work-items")).json()["items"][0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_work_item_provider_error_response_becomes_ready_for_review(monkeypatch):
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    async def fake_check(_payload):
+        return _mock_response(status="payer_error", error_message="Stedi AAA-79: Invalid Participant Identification - Resubmission Not Allowed")
+
+    monkeypatch.setattr(main_module.service, "check", fake_check)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        item_id = await _create_one_work_item(client)
+        response = await client.post(f"/work-items/{item_id}/validate")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["validation_status"] == "ready_for_review"
+        assert data["needs_validation"] is True
+        assert "AAA-79" in data["last_error_message"]
+        history = await client.get(f"/history/{data['last_request_id']}")
+        assert history.status_code == 200
+        assert history.json()["result"]["raw_response_json"] == {"status": "payer_error", "error_message": "Stedi AAA-79: Invalid Participant Identification - Resubmission Not Allowed"}
+
+
+@pytest.mark.asyncio
+async def test_work_item_active_response_becomes_validated_and_clears_error(monkeypatch):
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    async def fake_check(_payload):
+        return _mock_response(status="active")
+
+    monkeypatch.setattr(main_module.service, "check", fake_check)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        item_id = await _create_one_work_item(client)
+        await client.patch(f"/work-items/{item_id}", json={"notes": "edited"})
+        response = await client.post(f"/work-items/{item_id}/validate")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["validation_status"] == "validated"
+        assert data["needs_validation"] is False
+        assert data["last_error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_work_item_technical_exception_becomes_failed(monkeypatch):
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    async def fake_check(_payload):
+        raise RuntimeError("network timeout")
+
+    monkeypatch.setattr(main_module.service, "check", fake_check)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        item_id = await _create_one_work_item(client)
+        response = await client.post(f"/work-items/{item_id}/validate")
+        assert response.status_code == 502
+        item = await client.get(f"/work-items/{item_id}")
+        data = item.json()
+        assert data["validation_status"] == "failed"
+        assert data["needs_validation"] is True
+        assert "network timeout" in data["last_error_message"]

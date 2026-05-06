@@ -180,28 +180,68 @@ class StediAdapter(BaseEligibilityAdapter):
         return False
 
     @staticmethod
+    def _iter_nested(value: Any):
+        if isinstance(value, dict):
+            yield value
+            for nested in value.values():
+                yield from StediAdapter._iter_nested(nested)
+        elif isinstance(value, list):
+            for item in value:
+                yield from StediAdapter._iter_nested(item)
+
+    @staticmethod
+    def _aaa_errors(raw: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw, dict):
+            return []
+        found: list[dict[str, Any]] = []
+        for key in ("errors", "aaaErrors"):
+            values = raw.get(key, [])
+            if isinstance(values, list):
+                found.extend(item for item in values if isinstance(item, dict))
+        for obj in StediAdapter._iter_nested(raw):
+            values = obj.get("aaaErrors")
+            if isinstance(values, list):
+                found.extend(item for item in values if isinstance(item, dict))
+            if str(obj.get("segment") or obj.get("errorType") or "").upper() == "AAA":
+                found.append(obj)
+        deduped = []
+        seen = set()
+        for error in found:
+            key = (str(error.get("code") or ""), str(error.get("description") or ""), str(error.get("followupAction") or ""), str(error.get("location") or ""))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(error)
+        return deduped
+
+    @staticmethod
     def _error_message(errors: list[dict[str, Any]]) -> str | None:
         if not errors:
             return None
         first = errors[0]
-        parts = [first.get("code"), first.get("description"), first.get("followupAction")]
-        return " - ".join(str(p) for p in parts if p)
+        code = first.get("code") or first.get("errorCode") or "unknown"
+        description = first.get("description") or first.get("message") or "Provider returned an AAA error"
+        followup = first.get("followupAction") or first.get("followUpAction")
+        message = f"Stedi AAA-{code}: {description}"
+        if followup:
+            message += f" - {followup}"
+        return message
 
     @classmethod
     def _normalize_response(cls, raw: Any, request: EligibilityRequest) -> dict[str, Any]:
         benefits = cls._benefits(raw)
-        errors = cls._errors(raw)
+        errors = cls._aaa_errors(raw)
         service_type = request.service_type or "30"
         active = any(cls._benefit_code(b) == "1" and cls._matches_service(b, service_type) for b in benefits)
+        error_message = cls._error_message(errors)
         return {
-            "status": "inactive" if errors or not active else "active",
+            "status": "payer_error" if error_message else ("active" if active else "inactive"),
             "plan_name": cls._plan_name(benefits, service_type),
             "copay": cls._first_amount(benefits, "B", "benefitAmount"),
             "coinsurance": cls._percent(next((b for b in benefits if cls._benefit_code(b) == "A"), {})),
             "deductible_remaining": cls._first_amount(benefits, "C", "benefitAmount", prefer_remaining=True),
             "out_of_pocket_remaining": cls._first_amount(benefits, "G", "benefitAmount", prefer_remaining=True),
             "authorization_required": cls._authorization_required(benefits),
-            "error_message": cls._error_message(errors),
+            "error_message": error_message,
         }
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
