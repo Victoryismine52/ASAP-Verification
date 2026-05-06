@@ -29,7 +29,7 @@ _ADAPTER_BUILDERS: dict[str, Callable[[], BaseEligibilityAdapter]] = {
 PROVIDER_ADAPTER_MATRIX = [
     {"provider": "mock", "coverage_type": "Simulated", "real_time_support": "Yes (mocked)", "access_needed": "None", "best_use": "Local development and CI"},
     {"provider": "availity", "coverage_type": "Commercial and payer network", "real_time_support": "OAuth live; /coverages API call", "access_needed": "Availity app credentials", "best_use": "Availity-connected workflows"},
-    {"provider": "stedi", "coverage_type": "Multi-payer EDI gateway", "real_time_support": "Scaffolded", "access_needed": "Stedi API key + enrollment", "best_use": "Unified EDI integrations"},
+    {"provider": "stedi", "coverage_type": "Multi-payer EDI gateway", "real_time_support": "Candidate; endpoint mapping pending", "access_needed": "Stedi API key + eligibility API access/enrollment", "best_use": "Unified API-first X12 270/271 integrations"},
     {"provider": "optum_change", "coverage_type": "Commercial + clearinghouse", "real_time_support": "Scaffolded", "access_needed": "Client credentials + trading partner", "best_use": "Enterprise clearinghouse connectivity"},
     {"provider": "cms_hets", "coverage_type": "Medicare", "real_time_support": "Scaffolded", "access_needed": "HETS submitter account", "best_use": "Medicare beneficiary checks"},
     {"provider": "state_medicaid", "coverage_type": "State Medicaid", "real_time_support": "Varies by state", "access_needed": "State portal/API credentials", "best_use": "State-specific Medicaid verification"},
@@ -83,6 +83,12 @@ class EligibilityService:
             details = self._adapter.connection_details()
             if not details.get("configured", False):
                 return {"provider": self._provider, "connected": False, "detail": "not configured"}
+            if details.get("live_endpoint_implemented") is False:
+                return {
+                    "provider": self._provider,
+                    "connected": False,
+                    "detail": details.get("endpoint_status", "live endpoint mapping pending"),
+                }
             if self._provider == "availity":
                 await self._adapter._get_access_token()  # type: ignore[attr-defined]
             return {"provider": self._provider, "connected": True, "detail": "ok"}
