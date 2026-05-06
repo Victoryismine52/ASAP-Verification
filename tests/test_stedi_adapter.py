@@ -150,8 +150,47 @@ async def test_stedi_errors_create_error_message_and_inactive_status(monkeypatch
 
     response = await StediAdapter().check_eligibility(eligibility_request)
 
-    assert response.status == "inactive"
-    assert response.error_message == "42 - Subscriber not found - Correct member ID"
+    assert response.status == "payer_error"
+    assert response.error_message == "Stedi AAA-42: Subscriber not found - Correct member ID"
+
+
+@pytest.mark.asyncio
+async def test_stedi_aaa_79_response_preserves_raw_and_requires_review(monkeypatch, eligibility_request):
+    raw = {
+        "meta": {"applicationMode": "test"},
+        "tradingPartnerServiceId": "AHS",
+        "payer": {
+            "name": "Test Payer",
+            "aaaErrors": [
+                {
+                    "code": "79",
+                    "description": "Invalid Participant Identification",
+                    "followupAction": "Resubmission Not Allowed",
+                    "location": "Loop 2000A",
+                }
+            ],
+        },
+        "errors": [
+            {
+                "code": "79",
+                "description": "Invalid Participant Identification",
+                "followupAction": "Resubmission Not Allowed",
+                "location": "Loop 2000A",
+            }
+        ],
+        "x12": "AAA*N**79*N",
+    }
+    CapturingAsyncClient.response = httpx.Response(200, json=raw)
+    monkeypatch.setattr(settings, "stedi_api_key", "raw-test-key")
+    monkeypatch.setattr(httpx, "AsyncClient", CapturingAsyncClient)
+
+    response = await StediAdapter().check_eligibility(eligibility_request)
+
+    assert response.source == "stedi"
+    assert response.raw_response_json == raw
+    assert response.status not in {"active", "validated"}
+    assert response.status == "payer_error"
+    assert response.error_message == "Stedi AAA-79: Invalid Participant Identification - Resubmission Not Allowed"
 
 
 @pytest.mark.asyncio

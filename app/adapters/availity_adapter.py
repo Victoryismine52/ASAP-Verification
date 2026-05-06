@@ -196,6 +196,27 @@ class AvailityAdapter(BaseEligibilityAdapter):
         return False
 
     @staticmethod
+    def _first_error_message(raw: Any) -> str | None:
+        for obj in AvailityAdapter._iter_nested(raw):
+            if any(key in obj for key in ("errors", "error", "messages", "message")):
+                for key in ("message", "errorMessage", "description", "detail", "error"):
+                    value = obj.get(key)
+                    if value is not None and str(value).strip():
+                        return str(value)
+                for key in ("errors", "messages"):
+                    values = obj.get(key)
+                    if isinstance(values, list) and values:
+                        first = values[0]
+                        if isinstance(first, dict):
+                            for nested_key in ("message", "description", "detail", "error"):
+                                value = first.get(nested_key)
+                                if value is not None and str(value).strip():
+                                    return str(value)
+                        elif str(first).strip():
+                            return str(first)
+        return None
+
+    @staticmethod
     def _normalize_response(raw: Any) -> dict[str, Any]:
         status = AvailityAdapter._find_first_value(raw, ("status",)) or "unknown"
         plan_name = AvailityAdapter._find_first_value(
@@ -210,6 +231,7 @@ class AvailityAdapter(BaseEligibilityAdapter):
             "deductible_remaining": None,
             "out_of_pocket_remaining": None,
             "authorization_required": AvailityAdapter._authorization_required(raw),
+            "error_message": AvailityAdapter._first_error_message(raw),
         }
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
@@ -247,4 +269,5 @@ class AvailityAdapter(BaseEligibilityAdapter):
             source="availity",
             checked_at=datetime.now(tz=timezone.utc),
             raw_response_json=raw,
+            error_message=normalized["error_message"],
         )

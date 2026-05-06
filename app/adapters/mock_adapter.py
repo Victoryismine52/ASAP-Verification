@@ -25,6 +25,33 @@ class MockAdapter(BaseEligibilityAdapter):
         member_id = (request.patient.member_id or "").strip().upper()
         if member_id == "D003":
             raise RuntimeError("Demo payer returned member not found")
+        if member_id == "D005":
+            return EligibilityResponse(
+                status="inactive",
+                plan_name="Mock Inactive Coverage",
+                copay=None,
+                coinsurance=None,
+                deductible_remaining=None,
+                out_of_pocket_remaining=None,
+                authorization_required=True,
+                source="mock",
+                checked_at=datetime.now(tz=timezone.utc),
+                raw_response_json={"scenario": "inactive", "message": "Coverage inactive for requested service"},
+            )
+        if member_id == "D006":
+            return EligibilityResponse(
+                status="payer_error",
+                plan_name="Mock Payer Review",
+                copay=None,
+                coinsurance=None,
+                deductible_remaining=None,
+                out_of_pocket_remaining=None,
+                authorization_required=True,
+                source="mock",
+                checked_at=datetime.now(tz=timezone.utc),
+                raw_response_json={"scenario": "payer_error", "aaaErrors": [{"code": "79", "description": "Invalid Participant Identification"}]},
+                error_message="Mock AAA-79: Invalid Participant Identification - Resubmission Not Allowed",
+            )
         if member_id == "D002":
             return EligibilityResponse(
                 status="active",
