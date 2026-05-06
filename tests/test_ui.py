@@ -41,6 +41,11 @@ async def test_landing_page_served():
     assert "Import CSV to Work Queue" in response.text
     assert "Provider Adapter Matrix" in response.text
     assert "Verification Source" in response.text
+    assert "Preferred Source" in response.text
+    assert "Preview JSON" in response.text
+    assert "Edit" in response.text
+    assert "Send" in response.text
+    assert "View Response" in response.text
     assert "Verification Source Status" in response.text
     assert "Export Results CSV" in response.text
     assert "Check Type" in response.text
@@ -124,3 +129,11 @@ async def test_provider_matrix_endpoint():
     assert response.status_code == 200
     providers = response.json()["providers"]
     assert any(p["provider"] == "stedi" for p in providers)
+
+
+@pytest.mark.asyncio
+async def test_stedi_is_selectable_provider():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/ui/connections")
+    assert response.status_code == 200
+    assert "stedi" in response.json()["providers"]

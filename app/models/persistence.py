@@ -87,6 +87,7 @@ class VerificationWorkItem(Base):
     npi: Mapped[str] = mapped_column(String(40))
     tax_id: Mapped[str] = mapped_column(String(40))
     service_type: Mapped[str] = mapped_column(String(20), default="30")
+    preferred_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     needs_validation: Mapped[bool] = mapped_column(Boolean, default=True)
     validation_status: Mapped[str] = mapped_column(String(64), default="pending_validation")
