@@ -41,9 +41,16 @@ def ensure_optional_columns() -> None:
     if "verification_work_items" not in inspector.get_table_names():
         return
     columns = {column["name"] for column in inspector.get_columns("verification_work_items")}
-    if "preferred_provider" not in columns:
-        with engine.begin() as conn:
+    with engine.begin() as conn:
+        if "preferred_provider" not in columns:
             conn.execute(text("ALTER TABLE verification_work_items ADD COLUMN preferred_provider VARCHAR(64)"))
+        if "external_patient_id" not in columns:
+            conn.execute(text("ALTER TABLE verification_work_items ADD COLUMN external_patient_id VARCHAR(120)"))
+    if "verification_requests" in inspector.get_table_names():
+        request_columns = {column["name"] for column in inspector.get_columns("verification_requests")}
+        if "external_patient_id" not in request_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE verification_requests ADD COLUMN external_patient_id VARCHAR(120)"))
 
 
 @asynccontextmanager
@@ -76,6 +83,18 @@ def parse_stored_json(value: str | None):
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return value
+
+
+def work_item_request_payload(item: VerificationWorkItem) -> dict:
+    payload = {
+        "patient": {"first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id},
+        "payer": {"name": item.payer_name, "payer_id": item.payer_id},
+        "provider": {"npi": item.npi, "tax_id": item.tax_id},
+        "service_type": item.service_type,
+    }
+    if item.external_patient_id:
+        payload["external_patient_id"] = item.external_patient_id
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +308,8 @@ async def history_item(request_id: str, db: Session = Depends(get_db)) -> dict:
     res = db.query(VerificationResult).filter(VerificationResult.request_id == request_id).first()
     outbox = db.query(IntegrationOutbox).filter(IntegrationOutbox.request_id == request_id).order_by(IntegrationOutbox.created_at.desc()).first()
     payload = {"patient": {"first_name": req.patient_first_name, "last_name": req.patient_last_name, "dob": req.patient_dob.isoformat(), "member_id": req.patient_member_id}, "payer": {"name": req.payer_name, "payer_id": req.payer_id}, "provider": {"npi": req.provider_npi, "tax_id": req.provider_tax_id}, "service_type": req.service_type}
+    if req.external_patient_id:
+        payload["external_patient_id"] = req.external_patient_id
     return {
         "request": {"request_id": req.request_id, "status": req.status, "error_message": req.error_message, "provider_source": req.provider_source, "endpoint": req.endpoint, "created_at": req.created_at.isoformat()},
         "request_payload": payload,
@@ -314,7 +335,10 @@ async def rerun(request_id: str, db: Session = Depends(get_db)) -> dict:
     req = db.query(VerificationRequest).filter(VerificationRequest.request_id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="Not found")
-    payload = EligibilityRequest(patient={"first_name": req.patient_first_name, "last_name": req.patient_last_name, "dob": req.patient_dob.isoformat(), "member_id": req.patient_member_id}, payer={"name": req.payer_name, "payer_id": req.payer_id}, provider={"npi": req.provider_npi, "tax_id": req.provider_tax_id}, service_type=req.service_type)
+    payload_dict = {"patient": {"first_name": req.patient_first_name, "last_name": req.patient_last_name, "dob": req.patient_dob.isoformat(), "member_id": req.patient_member_id}, "payer": {"name": req.payer_name, "payer_id": req.payer_id}, "provider": {"npi": req.provider_npi, "tax_id": req.provider_tax_id}, "service_type": req.service_type}
+    if req.external_patient_id:
+        payload_dict["external_patient_id"] = req.external_patient_id
+    payload = EligibilityRequest(**payload_dict)
     return await ui_test_call(payload, db)
 
 
@@ -373,7 +397,7 @@ async def list_work_items(status: str | None = None, demo: str = "all", db: Sess
     elif demo == "exclude":
         q = q.filter(VerificationWorkItem.is_demo.is_(False))
     items = q.order_by(VerificationWorkItem.created_at.desc()).all()
-    return {"items": [{"id": i.id, "patient_key": i.patient_key, "first_name": i.first_name, "last_name": i.last_name, "dob": i.dob.isoformat(), "member_id": i.member_id, "payer_name": i.payer_name, "payer_id": i.payer_id, "service_type": i.service_type, "preferred_provider": i.preferred_provider, "validation_status": i.validation_status, "needs_validation": i.needs_validation, "last_validated_at": i.last_validated_at.isoformat() if i.last_validated_at else None, "last_request_id": i.last_request_id, "updated_at": i.updated_at.isoformat(), "source_system": i.source_system, "source_file_name": i.source_file_name, "source_row_number": i.source_row_number, "notes": i.notes, "manual_override_reason": i.manual_override_reason, "last_error_message": i.last_error_message, "created_at": i.created_at.isoformat(), "is_demo": i.is_demo} for i in items]}
+    return {"items": [{"id": i.id, "patient_key": i.patient_key, "first_name": i.first_name, "last_name": i.last_name, "dob": i.dob.isoformat(), "member_id": i.member_id, "payer_name": i.payer_name, "payer_id": i.payer_id, "service_type": i.service_type, "external_patient_id": i.external_patient_id, "preferred_provider": i.preferred_provider, "validation_status": i.validation_status, "needs_validation": i.needs_validation, "last_validated_at": i.last_validated_at.isoformat() if i.last_validated_at else None, "last_request_id": i.last_request_id, "updated_at": i.updated_at.isoformat(), "source_system": i.source_system, "source_file_name": i.source_file_name, "source_row_number": i.source_row_number, "notes": i.notes, "manual_override_reason": i.manual_override_reason, "last_error_message": i.last_error_message, "created_at": i.created_at.isoformat(), "is_demo": i.is_demo} for i in items]}
 
 
 @app.get("/work-items/{item_id:int}")
@@ -381,7 +405,7 @@ async def get_work_item(item_id: int, db: Session = Depends(get_db)) -> dict:
     item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
-    return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "preferred_provider": item.preferred_provider, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo}
+    return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "external_patient_id": item.external_patient_id, "preferred_provider": item.preferred_provider, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo}
 
 
 @app.post("/work-items/{item_id:int}/preview-request")
@@ -389,12 +413,7 @@ async def preview_work_item_request(item_id: int, db: Session = Depends(get_db))
     item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
-    payload = {
-        "patient": {"first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id},
-        "payer": {"name": item.payer_name, "payer_id": item.payer_id},
-        "provider": {"npi": item.npi, "tax_id": item.tax_id},
-        "service_type": item.service_type,
-    }
+    payload = work_item_request_payload(item)
     selected_source = item.preferred_provider or service.get_provider()
     return {"work_item_id": item.id, "endpoint": "/eligibility/check", "provider": selected_source, "selected_source": selected_source, "note": f"Selected source: {selected_source}", "payload": payload, "explanation": "This is the payload the API endpoint receives."}
 
@@ -405,7 +424,7 @@ async def patch_work_item(item_id: int, payload: dict, db: Session = Depends(get
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
     identity_before = (item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
-    for f in ["first_name","last_name","member_id","payer_name","payer_id","npi","tax_id","service_type","notes","manual_override_reason","source_system","source_file_name","source_row_number","preferred_provider"]:
+    for f in ["first_name","last_name","member_id","payer_name","payer_id","npi","tax_id","service_type","external_patient_id","notes","manual_override_reason","source_system","source_file_name","source_row_number","preferred_provider"]:
         if f in payload:
             setattr(item, f, payload[f])
     if "dob" in payload:
@@ -425,7 +444,7 @@ async def patch_work_item(item_id: int, payload: dict, db: Session = Depends(get
 
 
 async def _validate_work_item(item: VerificationWorkItem, db: Session, fallback_provider: str | None = None) -> dict:
-    payload = EligibilityRequest(patient={"first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id}, payer={"name": item.payer_name, "payer_id": item.payer_id}, provider={"npi": item.npi, "tax_id": item.tax_id}, service_type=item.service_type)
+    payload = EligibilityRequest(**work_item_request_payload(item))
     selected_provider = (item.preferred_provider or fallback_provider or service.get_provider()).lower()
     if selected_provider not in get_available_connections():
         raise HTTPException(status_code=400, detail=f"Unknown provider '{selected_provider}'")
@@ -566,6 +585,8 @@ async def factory_results_export(include_demo: bool = True, db: Session = Depend
             "provider": {"npi": item.npi, "tax_id": item.tax_id},
             "service_type": item.service_type,
         }
+        if item.external_patient_id:
+            request_payload["external_patient_id"] = item.external_patient_id
         w.writerow({
             "work_item_id": item.id,
             "patient_name": f"{item.first_name} {item.last_name}".strip(),

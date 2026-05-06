@@ -67,6 +67,20 @@ def test_stedi_url_normalization(monkeypatch, base_url, expected):
     assert StediAdapter._eligibility_url() == expected
 
 
+def test_stedi_request_body_uses_external_patient_id_when_provided(eligibility_request):
+    request = eligibility_request.model_copy(update={"external_patient_id": "UAA111222333"})
+
+    body = StediAdapter._request_body(request)
+
+    assert body["externalPatientId"] == "UAA111222333"
+
+
+def test_stedi_request_body_falls_back_to_member_id_when_external_patient_id_missing(eligibility_request):
+    body = StediAdapter._request_body(eligibility_request)
+
+    assert body["externalPatientId"] == "MBR123456"
+
+
 @pytest.mark.asyncio
 async def test_stedi_missing_api_key_returns_controlled_not_configured_response(monkeypatch, eligibility_request):
     monkeypatch.setattr(settings, "stedi_api_key", "")

@@ -34,6 +34,7 @@ class EligibilityRequest(BaseModel):
     provider: Provider
     # e.g. "30" = Health Benefit Plan Coverage
     service_type: str = Field(..., json_schema_extra={"example": "30"})
+    external_patient_id: str | None = Field(default=None, json_schema_extra={"example": "UAA111222333"})
 
 
 # ---------------------------------------------------------------------------

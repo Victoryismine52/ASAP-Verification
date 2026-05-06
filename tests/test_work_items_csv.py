@@ -30,6 +30,27 @@ async def test_csv_new_row_inserts_pending_work_item():
 
 
 @pytest.mark.asyncio
+async def test_csv_external_patient_id_is_stored_and_in_preview_payload():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    csv_text = (
+        "first_name,last_name,dob,member_id,payer_name,payer_id,npi,tax_id,service_type,external_patient_id\n"
+        "Jane,Doe,1900-01-01,123456789,AHS,AHS,1999999984,,30,UAA111222333\n"
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        res = await client.post("/work-items/import.csv", files={"file": ("patients.csv", csv_text, "text/csv")})
+        assert res.status_code == 200
+        assert res.json()["inserted"] == 1
+
+        item = (await client.get("/work-items")).json()["items"][0]
+        assert item["external_patient_id"] == "UAA111222333"
+
+        preview = await client.post(f"/work-items/{item['id']}/preview-request")
+        assert preview.status_code == 200
+        assert preview.json()["payload"]["external_patient_id"] == "UAA111222333"
+
+
+@pytest.mark.asyncio
 async def test_duplicate_row_updates_existing_item_and_no_duplicate_created():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

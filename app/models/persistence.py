@@ -18,6 +18,7 @@ class VerificationRequest(Base):
     patient_last_name: Mapped[str] = mapped_column(String(120))
     patient_dob: Mapped[date] = mapped_column(Date)
     patient_member_id: Mapped[str] = mapped_column(String(120))
+    external_patient_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     payer_name: Mapped[str] = mapped_column(String(200))
     payer_id: Mapped[str] = mapped_column(String(80))
@@ -87,6 +88,7 @@ class VerificationWorkItem(Base):
     npi: Mapped[str] = mapped_column(String(40))
     tax_id: Mapped[str] = mapped_column(String(40))
     service_type: Mapped[str] = mapped_column(String(20), default="30")
+    external_patient_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     preferred_provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     needs_validation: Mapped[bool] = mapped_column(Boolean, default=True)
