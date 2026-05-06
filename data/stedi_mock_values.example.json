@@ -1,0 +1,57 @@
+{
+  "description": "Non-secret reference file for Stedi-approved mock eligibility request values. Replace placeholder values with official Stedi mock request values from the Stedi docs or account before asking Codex to update demo_seed.json. Do not put API keys or secrets in this file.",
+  "source": "Stedi healthcare eligibility API mock/demo documentation or approved account docs",
+  "notes": [
+    "This file is safe to commit only when it contains public/documented mock patient values.",
+    "Never add STEDI_API_KEY, real patient data, or production payer credentials here.",
+    "Codex should use these rows as the source of truth for Stedi demo seed records."
+  ],
+  "stedi_mock_patients": [
+    {
+      "scenario": "active_coverage_success",
+      "description": "Approved Stedi mock patient expected to return active coverage.",
+      "preferred_provider": "stedi",
+      "first_name": "REPLACE_WITH_STEDI_APPROVED_FIRST_NAME",
+      "last_name": "REPLACE_WITH_STEDI_APPROVED_LAST_NAME",
+      "dob": "YYYY-MM-DD",
+      "member_id": "REPLACE_WITH_STEDI_APPROVED_MEMBER_ID",
+      "payer_name": "REPLACE_WITH_STEDI_APPROVED_PAYER_NAME",
+      "payer_id": "REPLACE_WITH_STEDI_TRADING_PARTNER_SERVICE_ID",
+      "npi": "REPLACE_WITH_STEDI_APPROVED_PROVIDER_NPI",
+      "tax_id": "",
+      "service_type": "30",
+      "expected_result": "success_active"
+    },
+    {
+      "scenario": "benefit_rich_success",
+      "description": "Approved Stedi mock patient expected to return richer benefits, if available in Stedi docs.",
+      "preferred_provider": "stedi",
+      "first_name": "REPLACE_WITH_STEDI_APPROVED_FIRST_NAME",
+      "last_name": "REPLACE_WITH_STEDI_APPROVED_LAST_NAME",
+      "dob": "YYYY-MM-DD",
+      "member_id": "REPLACE_WITH_STEDI_APPROVED_MEMBER_ID",
+      "payer_name": "REPLACE_WITH_STEDI_APPROVED_PAYER_NAME",
+      "payer_id": "REPLACE_WITH_STEDI_TRADING_PARTNER_SERVICE_ID",
+      "npi": "REPLACE_WITH_STEDI_APPROVED_PROVIDER_NPI",
+      "tax_id": "",
+      "service_type": "30",
+      "expected_result": "success_benefit_rich"
+    },
+    {
+      "scenario": "intentional_fixable_failure",
+      "description": "Intentional failure row. Keep it close to active_coverage_success but alter one value, usually member_id, so the demo can show edit and resend.",
+      "preferred_provider": "stedi",
+      "first_name": "REPLACE_WITH_SAME_FIRST_NAME_AS_ACTIVE_SUCCESS",
+      "last_name": "REPLACE_WITH_SAME_LAST_NAME_AS_ACTIVE_SUCCESS",
+      "dob": "YYYY-MM-DD",
+      "member_id": "REPLACE_WITH_INTENTIONALLY_WRONG_MEMBER_ID",
+      "correction_hint": "Correct member_id to REPLACE_WITH_STEDI_APPROVED_MEMBER_ID and resend.",
+      "payer_name": "REPLACE_WITH_STEDI_APPROVED_PAYER_NAME",
+      "payer_id": "REPLACE_WITH_STEDI_TRADING_PARTNER_SERVICE_ID",
+      "npi": "REPLACE_WITH_STEDI_APPROVED_PROVIDER_NPI",
+      "tax_id": "",
+      "service_type": "30",
+      "expected_result": "failure_then_success_after_correction"
+    }
+  ]
+}
