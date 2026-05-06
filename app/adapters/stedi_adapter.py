@@ -7,15 +7,25 @@ from app.models.eligibility import EligibilityRequest, EligibilityResponse
 
 
 class StediAdapter(BaseEligibilityAdapter):
+    """Stedi eligibility candidate adapter.
+
+    This adapter is intentionally not live yet: it records the credentials and
+    endpoint family needed for a future X12 270/271 sandbox/demo call while
+    returning a controlled scaffold response until Stedi endpoint mapping is
+    confirmed.
+    """
+
     def connection_details(self) -> dict:
         configured = bool(settings.stedi_api_key)
         return {
             "provider": "stedi",
             "configured": configured,
             "base_url": settings.stedi_base_url,
-            "access_requirements": "Stedi API key + partner enrollment",
+            "access_requirements": "STEDI_API_KEY plus Stedi account access/enrollment for eligibility APIs",
             "supported_transaction": "X12 270/271",
-            "notes": "Scaffold only; wire payer-specific mappings before production use.",
+            "live_endpoint_implemented": False,
+            "endpoint_status": "sandbox/demo endpoint mapping pending",
+            "notes": "API-first eligibility candidate; live endpoint mapping pending documentation/access.",
         }
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
@@ -30,6 +40,7 @@ class StediAdapter(BaseEligibilityAdapter):
                 authorization_required=True,
                 source="stedi",
                 checked_at=datetime.now(tz=timezone.utc),
+                error_message="Stedi credentials are not configured",
             )
         _ = request
         return EligibilityResponse(
@@ -42,4 +53,10 @@ class StediAdapter(BaseEligibilityAdapter):
             authorization_required=True,
             source="stedi",
             checked_at=datetime.now(tz=timezone.utc),
+            raw_response_json={
+                "provider": "stedi",
+                "base_url": settings.stedi_base_url,
+                "endpoint_implemented": False,
+                "message": "Scaffold response only; live endpoint mapping pending documentation/access.",
+            },
         )
