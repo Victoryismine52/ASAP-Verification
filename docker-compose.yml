@@ -8,9 +8,19 @@ services:
     env_file:
       - .env
     environment:
-      # Override with "availity" to use the real adapter
+      # Override with "availity" or "stedi" to use a real adapter
       ELIGIBILITY_PROVIDER: ${ELIGIBILITY_PROVIDER:-mock}
       DATABASE_URL: ${DATABASE_URL:-sqlite:///./data/asap_verification.db}
+      STEDI_API_KEY: ${STEDI_API_KEY:-}
+      STEDI_BASE_URL: ${STEDI_BASE_URL:-https://healthcare.us.stedi.com/2024-04-01}
+      STEDI_PROVIDER_ORGANIZATION_NAME: ${STEDI_PROVIDER_ORGANIZATION_NAME:-ACME Health Services}
+      AVAILITY_CLIENT_ID: ${AVAILITY_CLIENT_ID:-}
+      AVAILITY_CLIENT_SECRET: ${AVAILITY_CLIENT_SECRET:-}
+      AVAILITY_BASE_URL: ${AVAILITY_BASE_URL:-https://api.availity.com}
+      AVAILITY_SCOPE: ${AVAILITY_SCOPE:-healthcare-hipaa-transactions-demo}
+      AVAILITY_SUBMITTER_ID: ${AVAILITY_SUBMITTER_ID:-}
+      AVAILITY_PROVIDER_NPI: ${AVAILITY_PROVIDER_NPI:-}
+      AVAILITY_PROVIDER_TAX_ID: ${AVAILITY_PROVIDER_TAX_ID:-}
     # Hot-reload for development: mount source and override CMD
     volumes:
       - ./app:/app/app
