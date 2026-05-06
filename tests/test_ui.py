@@ -1,5 +1,6 @@
 """Tests for landing page and provider switching UI endpoints."""
 import os
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -53,6 +54,18 @@ async def test_landing_page_served():
     assert "Raw JSON" in response.text
     assert "Sync Form to JSON" in response.text
     assert "Sync JSON to Form" in response.text
+    assert "external_patient_id" in response.text
+
+
+def test_env_example_contains_safe_placeholders():
+    env_example = Path(".env.example")
+    assert env_example.exists()
+    text = env_example.read_text()
+    assert "STEDI_API_KEY=" in text
+    assert "Copy .env.example to .env" in text
+    assert "STEDI_API_KEY=sk_" not in text
+    assert "STEDI_API_KEY=Bearer" not in text
+    assert "availity_client_secret=secret" not in text.lower()
 
 
 @pytest.mark.asyncio
