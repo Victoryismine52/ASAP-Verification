@@ -77,7 +77,9 @@ class StediAdapter(BaseEligibilityAdapter):
             },
             "encounter": {"serviceTypeCodes": [request.service_type or "30"]},
         }
-        if len(request.patient.member_id) <= 36:
+        if request.external_patient_id:
+            body["externalPatientId"] = request.external_patient_id
+        elif len(request.patient.member_id) <= 36:
             body["externalPatientId"] = request.patient.member_id
         return body
 
