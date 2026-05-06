@@ -18,7 +18,8 @@ class Settings(BaseSettings):
 
     # Stedi credentials
     stedi_api_key: str = ""
-    stedi_base_url: str = "https://core.us.stedi.com"
+    stedi_base_url: str = "https://healthcare.us.stedi.com/2024-04-01"
+    stedi_provider_organization_name: str = "ASAP Verification Demo Provider"
 
     # Optum / Change Healthcare credentials
     optum_client_id: str = ""

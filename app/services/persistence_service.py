@@ -122,6 +122,7 @@ def upsert_work_item_from_csv_row(db: Session, row: dict[str, str], is_demo: boo
     item.npi = row["npi"]
     item.tax_id = row["tax_id"]
     item.service_type = row.get("service_type") or "30"
+    item.preferred_provider = (row.get("preferred_provider") or "").strip().lower() or None
     item.needs_validation = True
     item.validation_status = "needs_revalidation" if existing else "pending_validation"
     item.source_method = "csv_upload"

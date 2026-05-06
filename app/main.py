@@ -21,6 +21,7 @@ from pathlib import Path
 from app.routers import eligibility as eligibility_router
 from app.services.eligibility_service import PROVIDER_ADAPTER_MATRIX, get_available_connections, service
 from app.models.eligibility import EligibilityRequest
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 from app.db import Base, engine, get_db
 from app.models.persistence import IntegrationOutbox, VerificationRequest, VerificationResult, VerificationWorkItem
@@ -34,10 +35,22 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
+def ensure_optional_columns() -> None:
+    """Add safe demo columns for existing local SQLite databases."""
+    inspector = inspect(engine)
+    if "verification_work_items" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("verification_work_items")}
+    if "preferred_provider" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE verification_work_items ADD COLUMN preferred_provider VARCHAR(64)"))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Handle application startup and shutdown events."""
     Base.metadata.create_all(bind=engine)
+    ensure_optional_columns()
     logger.info("Eligibility service started.")
     yield
     logger.info("Eligibility service stopped.")
@@ -153,7 +166,8 @@ async function loadDemoData(){await fetch('/demo/load',{method:'POST'});await lo
 async function deleteDemoData(){await fetch('/demo/delete',{method:'DELETE'});await loadDemoCounts();await loadWork();}
 let liveDemoItems=[];let liveDemoHistory=[];let liveDemoOutbox=[];let factoryResponsesByWorkItemId={};let demoActivityLog=[];
 function addLiveDemoActivity(message){demoActivityLog.push({ts:new Date().toISOString(),message});const el=document.getElementById('demo-activity');if(el){el.innerHTML=demoActivityLog.map(x=>`<div class='activity-line'><strong>${x.ts}</strong> — ${x.message}</div>`).join('')||"<div class='activity-line muted'>No activity yet.</div>";}}
-function renderLiveDemoTable(){const t=document.getElementById('live-demo-table');if(!t)return;let html="<thead><tr><th>ID</th><th>Patient</th><th>DOB</th><th>Member ID</th><th>Payer</th><th>Check Type</th><th>Status</th><th>Last Checked</th><th>Actions</th></tr></thead><tbody>";for(const i of liveDemoItems){const hasResponse=Boolean(factoryResponsesByWorkItemId[i.id]?.validationResponse||factoryResponsesByWorkItemId[i.id]?.historyDetail||i.last_request_id);html+=`<tr><td>${i.id}</td><td>${i.first_name||''} ${i.last_name||''}</td><td>${i.dob||''}</td><td>${i.member_id||''}</td><td>${i.payer_name||''}</td><td>${checkTypeLabel(i.service_type)}</td><td>${badge(i.validation_status)}</td><td>${i.last_validated_at||''}</td><td><div class='action-group'><button class='btn btn-secondary btn-sm' onclick='previewLiveDemoRequestById(${i.id})'>Preview JSON</button><button class='btn btn-secondary btn-sm' onclick='editLiveDemoItem(${i.id})'>Edit</button><button class='btn btn-primary btn-sm' onclick='validateLiveDemoOne(${i.id})'>Send</button><button class='btn btn-secondary btn-sm' onclick='viewFactoryResponse(${i.id})' ${hasResponse?'':'disabled'}>View Response</button></div></td></tr>`;}t.innerHTML=html+'</tbody>';}
+function liveDemoSelectedSource(i){return i?.preferred_provider||document.getElementById('factory-provider')?.value||'mock';}
+function renderLiveDemoTable(){const t=document.getElementById('live-demo-table');if(!t)return;let html="<thead><tr><th>ID</th><th>Patient</th><th>DOB</th><th>Member ID</th><th>Payer</th><th>Check Type</th><th>Preferred Source</th><th>Status</th><th>Last Checked</th><th>Actions</th></tr></thead><tbody>";for(const i of liveDemoItems){const hasResponse=Boolean(factoryResponsesByWorkItemId[i.id]?.validationResponse||factoryResponsesByWorkItemId[i.id]?.historyDetail||i.last_request_id);html+=`<tr><td>${i.id}</td><td>${i.first_name||''} ${i.last_name||''}</td><td>${i.dob||''}</td><td>${i.member_id||''}</td><td>${i.payer_name||''}</td><td>${checkTypeLabel(i.service_type)}</td><td>${liveDemoSelectedSource(i)}</td><td>${badge(i.validation_status)}</td><td>${i.last_validated_at||''}</td><td><div class='action-group'><button class='btn btn-secondary btn-sm' onclick='previewLiveDemoRequestById(${i.id})'>Preview JSON</button><button class='btn btn-secondary btn-sm' onclick='editLiveDemoItem(${i.id})'>Edit</button><button class='btn btn-primary btn-sm' onclick='validateLiveDemoOne(${i.id})'>Send</button><button class='btn btn-secondary btn-sm' onclick='viewFactoryResponse(${i.id})' ${hasResponse?'':'disabled'}>View Response</button></div></td></tr>`;}t.innerHTML=html+'</tbody>';}
 function renderLiveDemoMetrics(){const m=document.getElementById('live-demo-metrics');if(!m)return;const pending=liveDemoItems.filter(i=>i.validation_status==='pending_validation').length;const needs=liveDemoItems.filter(i=>i.validation_status==='needs_revalidation').length;const validated=liveDemoItems.filter(i=>i.validation_status==='validated').length;const failed=liveDemoItems.filter(i=>i.validation_status==='failed').length;const ready=liveDemoOutbox.filter(i=>i.status==='ready_for_review').length;const exported=liveDemoOutbox.filter(i=>i.status==='exported').length;m.innerHTML=`<div class='metric'><div class='label'>Work Items</div><div class='value'>${liveDemoItems.length}</div></div><div class='metric'><div class='label'>Pending</div><div class='value'>${pending}</div></div><div class='metric'><div class='label'>Needs Revalidation</div><div class='value'>${needs}</div></div><div class='metric'><div class='label'>Validated</div><div class='value'>${validated}</div></div><div class='metric'><div class='label'>Failed</div><div class='value'>${failed}</div></div><div class='metric'><div class='label'>History Rows</div><div class='value'>${liveDemoHistory.length}</div></div><div class='metric'><div class='label'>Outbox Ready</div><div class='value'>${ready}</div></div><div class='metric'><div class='label'>Outbox Exported</div><div class='value'>${exported}</div></div>`;}
 async function loadLiveDemoProviders(){const meta=await fetch('/ui/connections').then(r=>r.json());const sel=document.getElementById('factory-provider');if(!sel)return;sel.innerHTML='';for(const p of meta.providers){const o=document.createElement('option');o.value=p;o.textContent=p;if(p===meta.current_provider)o.selected=true;sel.appendChild(o);}}
 async function renderFactorySourceStatus(){const el=document.getElementById('factory-source-status');if(!el)return;el.textContent='Verification Source Status: loading...';const esc=(v)=>String(v).replace(/[&<>'"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));try{const [connections,status,details]=await Promise.all([fetch('/ui/connections').then(r=>r.json()),fetch('/ui/connection-status').then(r=>r.json()),fetch('/ui/connection-details').then(r=>r.json())]);const provider=details.provider||connections.current_provider||status.provider||'unknown';const configured=details.configured===true?'yes':details.configured===false?'no':'unknown';const connectionStatus=status.connected===undefined?'':`${status.connected?'connected':'not connected'}${status.detail?` (${status.detail})`:''}`;const tokenStatus=details.token_status||status.token_status||details.token||status.token;const items=[['Selected provider',provider],['Configured',configured],['Base URL',details.base_url],['Supported transaction',details.supported_transaction],['Connection/token status',tokenStatus||connectionStatus],['Notes',details.notes],['Last checked',new Date().toLocaleString()]];el.innerHTML=`<strong>Verification Source Status</strong><div class='metrics'>${items.filter(([_,v])=>v!==undefined&&v!==null&&v!=='').map(([label,value])=>`<div class='metric'><div class='label'>${esc(label)}</div><div class='value' style='font-size:.95rem'>${esc(value)}</div></div>`).join('')}</div>`;}catch(err){el.textContent=`Verification Source Status: unavailable (${err?.message||err})`;}}
@@ -162,10 +176,10 @@ async function refreshLiveDemo(){const [w,h,o]=await Promise.all([fetch('/work-i
 function clearLiveDemoResponseState(){factoryResponsesByWorkItemId={};const latest=document.getElementById('live-demo-latest-action');if(latest){latest.textContent='Latest Action: none yet.';}const preview=document.getElementById('live-demo-preview');if(preview){preview.textContent='';}closeResponseModal();}
 async function resetLiveDemo(){clearLiveDemoResponseState();const r=await fetch('/demo/delete',{method:'DELETE'}).then(x=>x.json());addLiveDemoActivity(`DELETE /demo/delete → deleted demo rows (${JSON.stringify(r)})`);await refreshLiveDemo();await loadWork();await loadHistory();await loadOutbox();await loadDemoCounts();await dashboard();}
 async function loadLiveDemoPatients(){clearLiveDemoResponseState();const r=await fetch('/demo/load',{method:'POST'}).then(x=>x.json());addLiveDemoActivity(`POST /demo/load → loaded demo patients (${JSON.stringify(r)})`);await refreshLiveDemo();await loadWork();await loadHistory();await loadOutbox();await loadDemoCounts();await dashboard();}
-async function previewLiveDemoRequestById(id) {const r = await fetch(`/work-items/${id}/preview-request`, { method: 'POST' }).then(x => x.json());document.getElementById('live-demo-preview').textContent = JSON.stringify(r, null, 2);addLiveDemoActivity(`POST /work-items/${id}/preview-request → built JSON payload`);}
-async function showLatestFactoryResult(validationResponse){const latest=document.getElementById('live-demo-latest-action');for(const result of (validationResponse?.results||[])){const wid=result?.id;let historyDetail=null;if(result?.request_id){try{historyDetail=await fetchHistoryDetail(result.request_id);}catch(err){addLiveDemoActivity(`History fetch error for ${result.request_id}: ${err?.message||err}`);}}factoryResponsesByWorkItemId[wid]={validationResponse:result,historyDetail,fetchedAt:new Date().toISOString()};const summary=`Sent ${result?.first_name||'Demo Patient'} ${result?.member_id||wid} through ${validationResponse?.provider||'provider'}. Request ID: ${result?.request_id||'n/a'}. Status: ${result?.status||'unknown'}.`;if(latest){latest.innerHTML=`Latest Action: ${summary} <button class='btn btn-secondary btn-sm' onclick='viewFactoryResponse(${wid})'>View Response</button>`;}addLiveDemoActivity(summary);}}
+async function previewLiveDemoRequestById(id) {const r = await fetch(`/work-items/${id}/preview-request`, { method: 'POST' }).then(x => x.json());document.getElementById('live-demo-preview').textContent = JSON.stringify(r, null, 2);addLiveDemoActivity(`POST /work-items/${id}/preview-request → built JSON payload (${r.note||('Selected source: '+r.provider)})`);}
+async function showLatestFactoryResult(validationResponse){const latest=document.getElementById('live-demo-latest-action');for(const result of (validationResponse?.results||[])){const wid=result?.id;let historyDetail=null;if(result?.request_id){try{historyDetail=await fetchHistoryDetail(result.request_id);}catch(err){addLiveDemoActivity(`History fetch error for ${result.request_id}: ${err?.message||err}`);}}factoryResponsesByWorkItemId[wid]={validationResponse:result,historyDetail,fetchedAt:new Date().toISOString()};const summary=`Sent ${result?.first_name||'Demo Patient'} ${result?.member_id||wid} through ${result?.provider||validationResponse?.provider||'provider'}. Request ID: ${result?.request_id||'n/a'}. Status: ${result?.status||'unknown'}.`;if(latest){latest.innerHTML=`Latest Action: ${summary} <button class='btn btn-secondary btn-sm' onclick='viewFactoryResponse(${wid})'>View Response</button>`;}addLiveDemoActivity(summary);}}
 async function editLiveDemoItem(id){const cur=await fetch(`/work-items/${id}`).then(r=>r.json());const memberId=prompt('member_id',cur.member_id||'');if(memberId===null)return;const payerId=prompt('payer_id',cur.payer_id||'');if(payerId===null)return;await fetch(`/work-items/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({member_id:memberId,payer_id:payerId})});addLiveDemoActivity(`PATCH /work-items/${id} → edited member_id/payer_id`);await refreshLiveDemo();await loadWork();}
-async function validateLiveDemoOne(id) {const provider = document.getElementById('factory-provider').value;const r = await fetch('/work-items/validate-selected', {method: 'POST',headers: { 'Content-Type': 'application/json' },body: JSON.stringify({ ids: [id], provider })}).then(x => x.json());addLiveDemoActivity(`POST /work-items/validate-selected provider=${provider} → validated ${r.validated_count}, failed ${r.failed_count}`);await showLatestFactoryResult(r);await refreshLiveDemo();await loadWork();await loadHistory();await loadOutbox();await loadDemoCounts();await dashboard();}
+async function validateLiveDemoOne(id) {const item=liveDemoItems.find(x=>x.id===id);const provider = liveDemoSelectedSource(item);const fallbackProvider = document.getElementById('factory-provider').value;const r = await fetch('/work-items/validate-selected', {method: 'POST',headers: { 'Content-Type': 'application/json' },body: JSON.stringify({ ids: [id], provider: fallbackProvider })}).then(x => x.json());addLiveDemoActivity(`POST /work-items/validate-selected provider=${provider} → validated ${r.validated_count}, failed ${r.failed_count}`);await showLatestFactoryResult(r);await refreshLiveDemo();await loadWork();await loadHistory();await loadOutbox();await loadDemoCounts();await dashboard();}
 async function validateLiveDemoSelected(){alert('Use the row-level Send button or Send All Pending.');}
 async function previewLiveDemoRequest(){alert('Use the row-level Preview JSON button.');}
 async function validateLiveDemoAllPending(){const provider=document.getElementById('factory-provider').value;await fetch('/ui/select-connection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider})});addLiveDemoActivity(`POST /ui/select-connection → provider set to ${provider}`);const pendingIds=liveDemoItems.filter(i=>i.needs_validation).map(i=>i.id);const r=await fetch('/work-items/validate-selected',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:pendingIds,provider})}).then(x=>x.json());addLiveDemoActivity(`POST /work-items/validate-selected provider=${provider} → validated ${r.validated_count}, failed ${r.failed_count}`);await showLatestFactoryResult(r);await refreshLiveDemo();await loadWork();await loadHistory();await loadOutbox();await loadDemoCounts();await dashboard();}
@@ -359,7 +373,7 @@ async def list_work_items(status: str | None = None, demo: str = "all", db: Sess
     elif demo == "exclude":
         q = q.filter(VerificationWorkItem.is_demo.is_(False))
     items = q.order_by(VerificationWorkItem.created_at.desc()).all()
-    return {"items": [{"id": i.id, "patient_key": i.patient_key, "first_name": i.first_name, "last_name": i.last_name, "dob": i.dob.isoformat(), "member_id": i.member_id, "payer_name": i.payer_name, "payer_id": i.payer_id, "service_type": i.service_type, "validation_status": i.validation_status, "needs_validation": i.needs_validation, "last_validated_at": i.last_validated_at.isoformat() if i.last_validated_at else None, "last_request_id": i.last_request_id, "updated_at": i.updated_at.isoformat(), "source_system": i.source_system, "source_file_name": i.source_file_name, "source_row_number": i.source_row_number, "notes": i.notes, "manual_override_reason": i.manual_override_reason, "last_error_message": i.last_error_message, "created_at": i.created_at.isoformat(), "is_demo": i.is_demo} for i in items]}
+    return {"items": [{"id": i.id, "patient_key": i.patient_key, "first_name": i.first_name, "last_name": i.last_name, "dob": i.dob.isoformat(), "member_id": i.member_id, "payer_name": i.payer_name, "payer_id": i.payer_id, "service_type": i.service_type, "preferred_provider": i.preferred_provider, "validation_status": i.validation_status, "needs_validation": i.needs_validation, "last_validated_at": i.last_validated_at.isoformat() if i.last_validated_at else None, "last_request_id": i.last_request_id, "updated_at": i.updated_at.isoformat(), "source_system": i.source_system, "source_file_name": i.source_file_name, "source_row_number": i.source_row_number, "notes": i.notes, "manual_override_reason": i.manual_override_reason, "last_error_message": i.last_error_message, "created_at": i.created_at.isoformat(), "is_demo": i.is_demo} for i in items]}
 
 
 @app.get("/work-items/{item_id:int}")
@@ -367,7 +381,7 @@ async def get_work_item(item_id: int, db: Session = Depends(get_db)) -> dict:
     item = db.query(VerificationWorkItem).filter(VerificationWorkItem.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
-    return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo}
+    return {"id": item.id, "patient_key": item.patient_key, "first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id, "payer_name": item.payer_name, "payer_id": item.payer_id, "npi": item.npi, "tax_id": item.tax_id, "service_type": item.service_type, "preferred_provider": item.preferred_provider, "validation_status": item.validation_status, "needs_validation": item.needs_validation, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo}
 
 
 @app.post("/work-items/{item_id:int}/preview-request")
@@ -381,7 +395,8 @@ async def preview_work_item_request(item_id: int, db: Session = Depends(get_db))
         "provider": {"npi": item.npi, "tax_id": item.tax_id},
         "service_type": item.service_type,
     }
-    return {"work_item_id": item.id, "endpoint": "/eligibility/check", "provider": service.get_provider(), "payload": payload, "explanation": "This is the payload the API endpoint receives."}
+    selected_source = item.preferred_provider or service.get_provider()
+    return {"work_item_id": item.id, "endpoint": "/eligibility/check", "provider": selected_source, "selected_source": selected_source, "note": f"Selected source: {selected_source}", "payload": payload, "explanation": "This is the payload the API endpoint receives."}
 
 
 @app.patch("/work-items/{item_id:int}")
@@ -390,7 +405,7 @@ async def patch_work_item(item_id: int, payload: dict, db: Session = Depends(get
     if not item:
         raise HTTPException(status_code=404, detail="Not found")
     identity_before = (item.first_name, item.last_name, item.dob, item.member_id, item.payer_id)
-    for f in ["first_name","last_name","member_id","payer_name","payer_id","npi","tax_id","service_type","notes","manual_override_reason","source_system","source_file_name","source_row_number"]:
+    for f in ["first_name","last_name","member_id","payer_name","payer_id","npi","tax_id","service_type","notes","manual_override_reason","source_system","source_file_name","source_row_number","preferred_provider"]:
         if f in payload:
             setattr(item, f, payload[f])
     if "dob" in payload:
@@ -409,10 +424,15 @@ async def patch_work_item(item_id: int, payload: dict, db: Session = Depends(get
     return await get_work_item(item.id, db)
 
 
-async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
+async def _validate_work_item(item: VerificationWorkItem, db: Session, fallback_provider: str | None = None) -> dict:
     payload = EligibilityRequest(patient={"first_name": item.first_name, "last_name": item.last_name, "dob": item.dob.isoformat(), "member_id": item.member_id}, payer={"name": item.payer_name, "payer_id": item.payer_id}, provider={"npi": item.npi, "tax_id": item.tax_id}, service_type=item.service_type)
+    selected_provider = (item.preferred_provider or fallback_provider or service.get_provider()).lower()
+    if selected_provider not in get_available_connections():
+        raise HTTPException(status_code=400, detail=f"Unknown provider '{selected_provider}'")
+    previous_provider = service.get_provider()
+    service.set_provider(selected_provider)
     started = datetime.now(timezone.utc)
-    req_rec = create_request_record(db, payload, "/work-items/{id}/validate", service.get_provider(), is_demo=item.is_demo)
+    req_rec = create_request_record(db, payload, "/work-items/{id}/validate", selected_provider, is_demo=item.is_demo)
     try:
         response = await service.check(payload)
         complete_request_success(db, req_rec, response, started)
@@ -422,7 +442,7 @@ async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
         item.last_request_id = req_rec.request_id
         db.commit()
         db.refresh(item)
-        return {"id": item.id, "validation_status": item.validation_status, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo}
+        return {"id": item.id, "validation_status": item.validation_status, "last_request_id": item.last_request_id, "source_system": item.source_system, "source_file_name": item.source_file_name, "source_row_number": item.source_row_number, "notes": item.notes, "manual_override_reason": item.manual_override_reason, "last_error_message": item.last_error_message, "last_validated_at": item.last_validated_at.isoformat() if item.last_validated_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat(), "is_demo": item.is_demo, "preferred_provider": item.preferred_provider, "provider": selected_provider, "first_name": item.first_name, "member_id": item.member_id}
     except RuntimeError as exc:
         complete_request_error(db, req_rec, str(exc), started)
         item.validation_status = "failed"
@@ -430,6 +450,9 @@ async def _validate_work_item(item: VerificationWorkItem, db: Session) -> dict:
         item.last_error_message = str(exc)
         db.commit()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        if service.get_provider() != previous_provider:
+            service.set_provider(previous_provider)
 
 
 @app.post("/work-items/{item_id:int}/validate")
@@ -462,12 +485,12 @@ async def validate_selected_work_items(payload: dict, db: Session = Depends(get_
             results.append({"id": item_id, "status": "failed", "error": "Not found"})
             continue
         try:
-            result = await _validate_work_item(item, db)
+            result = await _validate_work_item(item, db, fallback_provider=provider)
             validated_count += 1
-            results.append({"id": item.id, "status": "validated", "request_id": result.get("last_request_id")})
+            results.append({"id": item.id, "status": "validated", "request_id": result.get("last_request_id"), "provider": result.get("provider"), "first_name": item.first_name, "member_id": item.member_id})
         except HTTPException as exc:
             failed_count += 1
-            results.append({"id": item.id, "status": "failed", "error": str(exc.detail)})
+            results.append({"id": item.id, "status": "failed", "error": str(exc.detail), "provider": item.preferred_provider or provider, "first_name": item.first_name, "member_id": item.member_id})
     return {"provider": provider, "requested_count": len(ids), "validated_count": validated_count, "failed_count": failed_count, "results": results}
 @app.post("/work-items/validate-pending")
 async def validate_pending_work_items(db: Session = Depends(get_db)) -> dict:
