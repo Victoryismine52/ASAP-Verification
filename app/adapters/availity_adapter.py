@@ -11,6 +11,7 @@ import httpx
 
 from app.adapters.base import BaseEligibilityAdapter
 from app.config import settings
+from app.services.runtime_config_service import runtime_config
 from app.models.eligibility import EligibilityRequest, EligibilityResponse
 
 logger = logging.getLogger(__name__)
@@ -23,11 +24,11 @@ class AvailityAdapter(BaseEligibilityAdapter):
         self._access_token: Optional[str] = None
 
     def connection_details(self) -> dict:
-        configured = bool(settings.availity_client_id and settings.availity_client_secret)
+        configured = bool(runtime_config.get_effective_value("availity", "client_id") and runtime_config.get_effective_value("availity", "client_secret"))
         return {
             "provider": "availity",
             "configured": configured,
-            "base_url": settings.availity_base_url,
+            "base_url": runtime_config.get_effective_value("availity", "base_url"),
             "access_requirements": "Availity client ID/secret and approved app",
             "supported_transaction": "X12 270/271",
             "notes": "OAuth token call is live; coverage API calls Availity /coverages using the configured client credentials and scope.",
@@ -36,7 +37,7 @@ class AvailityAdapter(BaseEligibilityAdapter):
     @staticmethod
     def _v1_url(path: str) -> str:
         """Build an Availity v1 URL without duplicating the /v1 path segment."""
-        base_url = settings.availity_base_url.rstrip("/")
+        base_url = runtime_config.get_effective_value("availity", "base_url").rstrip("/")
         if base_url.endswith("/v1"):
             base_url = base_url[: -len("/v1")]
         normalized_path = path.lstrip("/")
@@ -55,9 +56,9 @@ class AvailityAdapter(BaseEligibilityAdapter):
         # client_secret_post, so credentials are sent in the form body.
         payload = {
             "grant_type": "client_credentials",
-            "scope": settings.availity_scope,
-            "client_id": settings.availity_client_id,
-            "client_secret": settings.availity_client_secret,
+            "scope": runtime_config.get_effective_value("availity", "scope"),
+            "client_id": runtime_config.get_effective_value("availity", "client_id"),
+            "client_secret": runtime_config.get_effective_value("availity", "client_secret"),
         }
 
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -235,7 +236,7 @@ class AvailityAdapter(BaseEligibilityAdapter):
         }
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
-        if not (settings.availity_client_id and settings.availity_client_secret):
+        if not (runtime_config.get_effective_value("availity", "client_id") and runtime_config.get_effective_value("availity", "client_secret")):
             return EligibilityResponse(
                 status="inactive",
                 plan_name="Not configured: missing AVAILITY_CLIENT_ID/AVAILITY_CLIENT_SECRET",

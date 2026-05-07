@@ -12,6 +12,7 @@ from app.adapters.optum_change_adapter import OptumChangeAdapter
 from app.adapters.state_medicaid_adapter import StateMedicaidAdapter
 from app.adapters.stedi_adapter import StediAdapter
 from app.config import settings
+from app.services.runtime_config_service import runtime_config
 from app.models.eligibility import EligibilityRequest, EligibilityResponse
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def get_available_connections() -> list[str]:
 
 class EligibilityService:
     def __init__(self) -> None:
-        self._provider = settings.eligibility_provider.lower()
+        self._provider = runtime_config.get_effective_value("global", "eligibility_provider").lower()
         self._adapter: BaseEligibilityAdapter = self._build_adapter(self._provider)
 
     def _build_adapter(self, provider: str) -> BaseEligibilityAdapter:

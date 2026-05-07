@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     availity_base_url: str = "https://api.availity.com"
     # Space-delimited OAuth scopes; can be overridden in .env for each client app.
     availity_scope: str = "healthcare-hipaa-transactions-demo"
+    availity_submitter_id: str = ""
+    availity_provider_npi: str = ""
+    availity_provider_tax_id: str = ""
 
     # Stedi credentials
     stedi_api_key: str = ""
