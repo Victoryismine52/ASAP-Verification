@@ -7,6 +7,7 @@ import httpx
 
 from app.adapters.base import BaseEligibilityAdapter
 from app.config import settings
+from app.services.runtime_config_service import runtime_config
 from app.models.eligibility import EligibilityRequest, EligibilityResponse
 
 
@@ -17,11 +18,11 @@ class StediAdapter(BaseEligibilityAdapter):
     _ELIGIBILITY_PATH = "change/medicalnetwork/eligibility/v3"
 
     def connection_details(self) -> dict:
-        configured = bool(settings.stedi_api_key)
+        configured = bool(runtime_config.get_effective_value("stedi", "api_key"))
         return {
             "provider": "stedi",
             "configured": configured,
-            "base_url": settings.stedi_base_url,
+            "base_url": runtime_config.get_effective_value("stedi", "base_url"),
             "normalized_base_url": self._normalized_base_url(),
             "access_requirements": "Stedi API key; test keys require approved mock requests",
             "supported_transaction": "X12 270/271 via Stedi eligibility JSON API",
@@ -32,7 +33,7 @@ class StediAdapter(BaseEligibilityAdapter):
 
     @classmethod
     def _normalized_base_url(cls) -> str:
-        base_url = (settings.stedi_base_url or "https://healthcare.us.stedi.com/2024-04-01").strip().rstrip("/")
+        base_url = (runtime_config.get_effective_value("stedi", "base_url") or "https://healthcare.us.stedi.com/2024-04-01").strip().rstrip("/")
         parts = urlsplit(base_url)
         scheme = parts.scheme or "https"
         netloc = parts.netloc or parts.path.split("/")[0]
@@ -66,7 +67,7 @@ class StediAdapter(BaseEligibilityAdapter):
         body: dict[str, Any] = {
             "tradingPartnerServiceId": request.payer.payer_id,
             "provider": {
-                "organizationName": settings.stedi_provider_organization_name,
+                "organizationName": runtime_config.get_effective_value("stedi", "provider_organization_name"),
                 "npi": request.provider.npi,
             },
             "subscriber": {
@@ -245,7 +246,7 @@ class StediAdapter(BaseEligibilityAdapter):
         }
 
     async def check_eligibility(self, request: EligibilityRequest) -> EligibilityResponse:
-        if not settings.stedi_api_key:
+        if not runtime_config.get_effective_value("stedi", "api_key"):
             return EligibilityResponse(
                 status="inactive",
                 plan_name="Not configured: missing STEDI_API_KEY",
@@ -264,7 +265,7 @@ class StediAdapter(BaseEligibilityAdapter):
             response = await client.post(
                 self._eligibility_url(),
                 headers={
-                    "Authorization": settings.stedi_api_key,
+                    "Authorization": runtime_config.get_effective_value("stedi", "api_key"),
                     "Accept": "application/json",
                     "Content-Type": "application/json",
                 },

@@ -57,6 +57,12 @@ async def test_landing_page_served():
     assert "external_patient_id" in response.text
     assert "API responded; eligibility requires review" in response.text
     assert "last_error_message" in response.text
+    assert "Admin" in response.text
+    assert "Provider Connection Settings" in response.text
+    assert "STEDI_API_KEY" in response.text
+    assert "AVAILITY_CLIENT_SECRET" in response.text
+    assert "Save Runtime Settings" in response.text
+    assert "Reset Runtime Overrides" in response.text
 
 
 def test_env_example_contains_safe_placeholders():
